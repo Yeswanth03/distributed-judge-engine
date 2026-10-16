@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * Trusts the gateway for user identity: it verifies the login token and forwards X-User-Role.
@@ -24,14 +25,19 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
-        String path = request.getRequestURI();
+        // Decide on the route Spring matched, not the raw URI: "/admin;x/problems" or "/%61dmin/problems"
+        // reach AdminController but do not start with "/admin/". Anything unrecognised is denied.
+        Object matched = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+        String pattern = matched instanceof String s ? s : "";
 
-        if (path.startsWith("/admin/")) {
+        if (pattern.startsWith("/admin/")) {
             if (!"admin".equalsIgnoreCase(request.getHeader("X-User-Role"))) {
                 deny(response, 403, "forbidden", "admin role required");
                 return false;
             }
-        } else if (path.startsWith("/internal/")) {
+            return true;
+        }
+        if (pattern.startsWith("/internal/")) {
             String presented = request.getHeader("X-Service-Token");
             boolean ok = presented != null
                     && MessageDigest.isEqual(presented.getBytes(StandardCharsets.UTF_8), internalToken);
@@ -39,8 +45,10 @@ public class AuthInterceptor implements HandlerInterceptor {
                 deny(response, 401, "unauthorized", "valid service token required");
                 return false;
             }
+            return true;
         }
-        return true;
+        deny(response, 403, "forbidden", "access denied");
+        return false;
     }
 
     private static void deny(HttpServletResponse response, int status, String error, String message) throws Exception {

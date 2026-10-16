@@ -1,6 +1,6 @@
-package com.minicodejudge.catalog.repo;
+package com.minicodejudge.catalog.repository;
 
-import com.minicodejudge.catalog.api.ProblemDtos.CreateProblemRequest;
+import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;

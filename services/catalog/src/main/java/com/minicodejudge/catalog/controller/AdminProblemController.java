@@ -1,7 +1,7 @@
-package com.minicodejudge.catalog.api;
+package com.minicodejudge.catalog.controller;
 
-import com.minicodejudge.catalog.api.ProblemDtos.CreateProblemRequest;
-import com.minicodejudge.catalog.api.ProblemDtos.ProblemCreated;
+import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
+import com.minicodejudge.catalog.dto.ProblemDtos.ProblemCreated;
 import com.minicodejudge.catalog.service.ProblemService;
 import jakarta.validation.Valid;
 import java.util.UUID;
@@ -12,7 +12,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Admin writes for problems. The admin role check lives in AuthInterceptor. */
 @RestController
 @RequestMapping("/admin/problems")
 public class AdminProblemController {

@@ -1,8 +1,9 @@
-package com.minicodejudge.catalog.api;
+package com.minicodejudge.catalog.dto;
 
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.UUID;
@@ -19,9 +20,10 @@ public final class ProblemDtos {
             @NotBlank @Size(max = 200) String title,
             @NotBlank String statementMd,
             @NotBlank @Pattern(regexp = "easy|medium|hard", message = "must be easy, medium or hard") String difficulty,
-            @Min(1) @Max(1000) int points,
-            @Min(100) @Max(60000) int timeLimitMs,
-            @Min(16) @Max(1024) int memoryLimitMb) {}
+            // Boxed so a missing number is reported as a named validation error, not an unreadable body.
+            @NotNull @Min(1) @Max(1000) Integer points,
+            @NotNull @Min(100) @Max(60000) Integer timeLimitMs,
+            @NotNull @Min(16) @Max(1024) Integer memoryLimitMb) {}
 
     public record ProblemCreated(UUID id) {}
 }
