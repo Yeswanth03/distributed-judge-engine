@@ -18,8 +18,6 @@
 
   <properties>
     <java.version>21</java.version>
-    <!-- Empty default so @{argLine} in Surefire resolves when no other plugin (e.g. JaCoCo) sets it. -->
-    <argLine></argLine>
   </properties>
 
   <dependencies>
@@ -87,23 +85,13 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
       </plugin>
-      <!-- Load Mockito as a JVM agent at startup; self-attaching at runtime is deprecated by the JDK. -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-dependency-plugin</artifactId>
-        <executions>
-          <execution>
-            <goals>
-              <goal>properties</goal>
-            </goals>
-          </execution>
-        </executions>
-      </plugin>
+      <!-- Load Mockito as a JVM agent at startup; self-attaching at runtime is deprecated by the JDK.
+           mockito.version comes from the Spring Boot parent, so this stays in step with the managed version. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+          <argLine>-javaagent:${settings.localRepository}/org/mockito/mockito-core/${mockito.version}/mockito-core-${mockito.version}.jar -Xshare:off</argLine>
         </configuration>
       </plugin>
     </plugins>
