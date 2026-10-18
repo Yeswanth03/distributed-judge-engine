@@ -2,6 +2,7 @@ package com.minicodejudge.catalog.controller;
 
 import com.minicodejudge.catalog.dto.ApiError;
 import com.minicodejudge.catalog.service.ConflictException;
+import com.minicodejudge.catalog.service.NotFoundException;
 import java.util.Locale;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
@@ -10,9 +11,15 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<ApiError> notFound(NotFoundException e) {
+        return build(HttpStatus.NOT_FOUND, "not_found", e.getMessage());
+    }
 
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conflict(ConflictException e) {
@@ -30,6 +37,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> unreadable() {
         return build(HttpStatus.BAD_REQUEST, "bad_request", "malformed request body");
+    }
+
+    /** A path or query value of the wrong type, e.g. /admin/problems/abc where a UUID is expected. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> typeMismatch(MethodArgumentTypeMismatchException e) {
+        return build(HttpStatus.BAD_REQUEST, "bad_request", "invalid value for " + e.getName());
     }
 
     private static ResponseEntity<ApiError> build(HttpStatus status, String error, String message) {

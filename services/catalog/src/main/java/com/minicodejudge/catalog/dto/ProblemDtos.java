@@ -8,7 +8,7 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.UUID;
 
-/** Request and response shapes for problems. JSON field names are snake_case (see application.yml). */
+/** Request and response shapes for problems. JSON field names are snake_case (see application.properties). */
 public final class ProblemDtos {
 
     private ProblemDtos() {}
@@ -21,6 +21,15 @@ public final class ProblemDtos {
             @NotBlank String statementMd,
             @NotBlank @Pattern(regexp = "easy|medium|hard", message = "must be easy, medium or hard") String difficulty,
             // Boxed so a missing number is reported as a named validation error, not an unreadable body.
+            @NotNull @Min(1) @Max(1000) Integer points,
+            @NotNull @Min(100) @Max(60000) Integer timeLimitMs,
+            @NotNull @Min(16) @Max(1024) Integer memoryLimitMb) {}
+
+    /** Full replacement of the editable fields. The slug is set once at creation and is not part of an update. */
+    public record UpdateProblemRequest(
+            @NotBlank @Size(max = 200) String title,
+            @NotBlank String statementMd,
+            @NotBlank @Pattern(regexp = "easy|medium|hard", message = "must be easy, medium or hard") String difficulty,
             @NotNull @Min(1) @Max(1000) Integer points,
             @NotNull @Min(100) @Max(60000) Integer timeLimitMs,
             @NotNull @Min(16) @Max(1024) Integer memoryLimitMb) {}
