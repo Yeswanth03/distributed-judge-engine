@@ -3,6 +3,7 @@ package com.minicodejudge.catalog.controller;
 import com.minicodejudge.catalog.dto.ApiError;
 import com.minicodejudge.catalog.service.ConflictException;
 import com.minicodejudge.catalog.service.NotFoundException;
+import com.minicodejudge.catalog.service.UnprocessableException;
 import java.util.Locale;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> conflict(ConflictException e) {
         return build(HttpStatus.CONFLICT, "conflict", e.getMessage());
+    }
+
+    @ExceptionHandler(UnprocessableException.class)
+    public ResponseEntity<ApiError> unprocessable(UnprocessableException e) {
+        return build(HttpStatus.UNPROCESSABLE_CONTENT, "validation_failed", e.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

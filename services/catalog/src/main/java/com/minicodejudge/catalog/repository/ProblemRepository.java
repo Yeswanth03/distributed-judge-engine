@@ -11,8 +11,12 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class ProblemRepository {
 
-    /** The columns the update rules look at: status, plus the fields that lock once a problem is published. */
-    public record LockedFields(String status, String difficulty, int points, int timeLimitMs, int memoryLimitMb) {}
+    /**
+     * The columns the write rules look at: status and current version, plus the fields that lock once a problem
+     * is published. currentVersion is null until the first publish.
+     */
+    public record LockedFields(
+            String status, Integer currentVersion, String difficulty, int points, int timeLimitMs, int memoryLimitMb) {}
 
     private final JdbcClient jdbc;
 
@@ -39,7 +43,7 @@ public class ProblemRepository {
     /** Row-locks the problem until the transaction ends, so concurrent writes to it run one after another. */
     public Optional<LockedFields> lockById(UUID id) {
         return jdbc.sql("""
-                SELECT status, difficulty, points, time_limit_ms, memory_limit_mb
+                SELECT status, current_version, difficulty, points, time_limit_ms, memory_limit_mb
                   FROM problems
                  WHERE id = :id
                    FOR UPDATE
@@ -47,6 +51,7 @@ public class ProblemRepository {
                 .param("id", id)
                 .query((rs, rowNum) -> new LockedFields(
                         rs.getString("status"),
+                        rs.getObject("current_version", Integer.class),
                         rs.getString("difficulty"),
                         rs.getInt("points"),
                         rs.getInt("time_limit_ms"),
@@ -68,6 +73,17 @@ public class ProblemRepository {
                 .param("points", r.points())
                 .param("timeLimitMs", r.timeLimitMs())
                 .param("memoryLimitMb", r.memoryLimitMb())
+                .update();
+    }
+
+    /** Points the problem at a newly published test set version and makes it visible. */
+    public void markPublished(UUID id, int version) {
+        jdbc.sql("""
+                UPDATE problems SET status = 'published', current_version = :version, updated_at = now()
+                 WHERE id = :id
+                """)
+                .param("id", id)
+                .param("version", version)
                 .update();
     }
 }
