@@ -55,6 +55,12 @@
       <artifactId>micrometer-registry-prometheus</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <!-- Swagger UI at /swagger-ui.html and the OpenAPI document at /v3/api-docs. 3.x is the Spring Boot 4 line. -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>3.1.1</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
