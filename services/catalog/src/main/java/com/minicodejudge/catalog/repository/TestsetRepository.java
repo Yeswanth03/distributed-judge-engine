@@ -1,6 +1,8 @@
 package com.minicodejudge.catalog.repository;
 
+import com.minicodejudge.catalog.dto.ProblemDtos.Sample;
 import com.minicodejudge.catalog.dto.TestsetDtos.CaseRequest;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -54,6 +56,19 @@ public class TestsetRepository {
                 .param("version", version)
                 .query(String.class)
                 .optional();
+    }
+
+    /** The sample cases of one version, in judging order. Hidden cases are never selected here. */
+    public List<Sample> findSamples(UUID problemId, int version) {
+        return jdbc.sql("""
+                SELECT input, expected_output FROM test_cases
+                 WHERE problem_id = :problemId AND testset_version = :version AND is_sample
+                 ORDER BY ordinal
+                """)
+                .param("problemId", problemId)
+                .param("version", version)
+                .query((rs, rowNum) -> new Sample(rs.getString("input"), rs.getString("expected_output")))
+                .list();
     }
 
     public void markPublished(UUID problemId, int version) {

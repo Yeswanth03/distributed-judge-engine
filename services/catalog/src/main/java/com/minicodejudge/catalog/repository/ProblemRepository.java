@@ -1,9 +1,12 @@
 package com.minicodejudge.catalog.repository;
 
 import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
+import com.minicodejudge.catalog.dto.ProblemDtos.ProblemSummary;
 import com.minicodejudge.catalog.dto.ProblemDtos.UpdateProblemRequest;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -85,5 +88,58 @@ public class ProblemRepository {
                 .param("id", id)
                 .param("version", version)
                 .update();
+    }
+
+    // ---- public reads ----
+
+    /** A published problem plus the version its samples come from (never null once published). */
+    public record PublishedProblem(
+            UUID id, String slug, String title, String statementMd, String difficulty,
+            int points, int timeLimitMs, int memoryLimitMb, int currentVersion) {}
+
+    public Optional<PublishedProblem> findPublishedBySlug(String slug) {
+        return jdbc.sql("""
+                SELECT id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb, current_version
+                  FROM problems
+                 WHERE slug = :slug AND status = 'published'
+                """)
+                .param("slug", slug)
+                .query((rs, rowNum) -> new PublishedProblem(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("slug"),
+                        rs.getString("title"),
+                        rs.getString("statement_md"),
+                        rs.getString("difficulty"),
+                        rs.getInt("points"),
+                        rs.getInt("time_limit_ms"),
+                        rs.getInt("memory_limit_mb"),
+                        rs.getInt("current_version")))
+                .optional();
+    }
+
+    /**
+     * Published problems in slug order, starting after {@code afterSlug} (keyset paging: stable while problems
+     * are added, and a single index range scan). Both filters are optional.
+     */
+    public List<ProblemSummary> listPublished(@Nullable String difficulty, @Nullable String afterSlug, int limit) {
+        return jdbc.sql("""
+                SELECT id, slug, title, difficulty, points
+                  FROM problems
+                 WHERE status = 'published'
+                   AND (CAST(:difficulty AS TEXT) IS NULL OR difficulty = :difficulty)
+                   AND (CAST(:after AS TEXT) IS NULL OR slug > :after)
+                 ORDER BY slug
+                 LIMIT :limit
+                """)
+                .param("difficulty", difficulty)
+                .param("after", afterSlug)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new ProblemSummary(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("slug"),
+                        rs.getString("title"),
+                        rs.getString("difficulty"),
+                        rs.getInt("points")))
+                .list();
     }
 }
