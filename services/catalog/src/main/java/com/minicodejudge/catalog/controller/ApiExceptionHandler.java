@@ -12,6 +12,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
@@ -43,6 +44,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> unreadable() {
         return build(HttpStatus.BAD_REQUEST, "bad_request", "malformed request body");
+    }
+
+    /** A query or path parameter breaks a rule declared on it, e.g. ?limit=500 or ?difficulty=brutal. */
+    @ExceptionHandler(HandlerMethodValidationException.class)
+    public ResponseEntity<ApiError> invalidParameter(HandlerMethodValidationException e) {
+        String message = e.getParameterValidationResults().stream()
+                .flatMap(r -> r.getResolvableErrors().stream()
+                        .map(err -> r.getMethodParameter().getParameterName() + " " + err.getDefaultMessage()))
+                .collect(Collectors.joining("; "));
+        return build(HttpStatus.BAD_REQUEST, "bad_request", message);
     }
 
     /** A path or query value of the wrong type, e.g. /admin/problems/abc where a UUID is expected. */

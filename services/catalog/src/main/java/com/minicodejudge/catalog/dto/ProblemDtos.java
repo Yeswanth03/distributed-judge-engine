@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
+import java.util.List;
 import java.util.UUID;
 
 /** Request and response shapes for problems. JSON field names are snake_case (see application.properties). */
@@ -53,4 +54,36 @@ public final class ProblemDtos {
 
     public record ProblemCreated(
             @Schema(description = "Problem id used in every other call and by other services") UUID id) {}
+
+    // ---- public reads ----
+
+    /** A visible example: only cases marked is_sample ever appear here. */
+    public record Sample(
+            @Schema(example = "2 7 11 15\n9") String input,
+            @Schema(example = "0 1") String expectedOutput) {}
+
+    /** One published problem as users see it: no status, no version, no hidden cases. */
+    public record ProblemView(
+            @Schema(description = "Problem id; submissions refer to the problem by this") UUID id,
+            @Schema(example = "two-sum") String slug,
+            @Schema(example = "Two Sum") String title,
+            @Schema(description = "Problem statement in Markdown") String statementMd,
+            @Schema(allowableValues = {"easy", "medium", "hard"}, example = "easy") String difficulty,
+            @Schema(example = "100") int points,
+            @Schema(example = "1000") int timeLimitMs,
+            @Schema(example = "256") int memoryLimitMb,
+            @Schema(description = "Sample cases of the published version, in judging order") List<Sample> samples) {}
+
+    /** One row of the problem list; no statement or samples, to keep pages light. */
+    public record ProblemSummary(
+            UUID id,
+            @Schema(example = "two-sum") String slug,
+            @Schema(example = "Two Sum") String title,
+            @Schema(allowableValues = {"easy", "medium", "hard"}, example = "easy") String difficulty,
+            @Schema(example = "100") int points) {}
+
+    public record ProblemPage(
+            @Schema(description = "Published problems, sorted by slug") List<ProblemSummary> items,
+            @Schema(description = "Pass as cursor to get the next page; null on the last page", example = "two-sum")
+            String nextCursor) {}
 }
