@@ -2,7 +2,6 @@
 # Why a container: -race needs cgo, and Windows Application Control can block test binaries built in %TEMP%.
 #   docker compose up -d --wait postgres rabbitmq   # from the repo root
 #   .\scripts\test.ps1                               # extra args go to `go test`, e.g. -run TestReapStuck
-$ErrorActionPreference = 'Stop'
 $service = Split-Path -Parent $PSScriptRoot
 docker run --rm `
     -v "${service}:/src" -v gomodcache:/go/pkg/mod -v gobuildcache:/root/.cache/go-build `

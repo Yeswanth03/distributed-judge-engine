@@ -3,7 +3,7 @@
 CREATE TABLE submissions (
     id                 UUID         PRIMARY KEY,
     user_id            UUID         NOT NULL,
-    problem_id         VARCHAR(64)  NOT NULL, -- Catalog problem slug
+    problem_id         VARCHAR(80)  NOT NULL, -- Catalog problem slug (Catalog allows up to 80 characters)
     language           VARCHAR(32)  NOT NULL,
     code               TEXT         NOT NULL,
     status             VARCHAR(32)  NOT NULL DEFAULT 'QUEUED'
