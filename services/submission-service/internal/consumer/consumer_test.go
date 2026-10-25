@@ -212,9 +212,17 @@ func TestDBConsumerAppliesAndAcks(t *testing.T) {
 	if n := r.ready(t); n != 0 {
 		t.Fatalf("%d messages back in the queue, want all acked", n)
 	}
-	calls := store.snapshot()
-	if calls[0].op != "running" || calls[1].ev.ExecutionTimeMS != 38 {
-		t.Fatalf("calls %+v", calls)
+	// Workers run in parallel, so the order of calls is not guaranteed (COMPLETED can be applied before
+	// RUNNING). That is fine: the repository's guarded UPDATEs give the same final state in any order.
+	ops := map[string]int{}
+	for _, c := range store.snapshot() {
+		ops[c.op]++
+		if c.op == "verdict" && c.ev.ExecutionTimeMS != 38 {
+			t.Fatalf("verdict decoded wrongly: %+v", c.ev)
+		}
+	}
+	if ops["running"] != 1 || ops["verdict"] != 2 {
+		t.Fatalf("store calls %v, want 1 running and 2 verdict", ops)
 	}
 }
 

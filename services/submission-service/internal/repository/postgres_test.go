@@ -408,9 +408,9 @@ func TestReapStuck(t *testing.T) {
 	freshRunning := createSubmission(t, repo, user, "two-sum", time.Now())
 	done := createSubmission(t, repo, user, "two-sum", time.Now())
 
-	repo.MarkRunning(ctx, oldRunning.ID)   //nolint:errcheck
-	repo.MarkRunning(ctx, freshRunning.ID) //nolint:errcheck
-	repo.UpdateVerdictIdempotent(ctx, verdictEvent(done.ID, model.VerdictAccepted, 1)) //nolint:errcheck
+	repo.MarkRunning(ctx, oldRunning.ID)                                                               //nolint:errcheck
+	repo.MarkRunning(ctx, freshRunning.ID)                                                             //nolint:errcheck
+	repo.UpdateVerdictIdempotent(ctx, verdictEvent(done.ID, model.VerdictAccepted, 1))                 //nolint:errcheck
 	pool.Exec(ctx, `UPDATE submissions SET updated_at = NOW() - INTERVAL '1 hour' WHERE id = ANY($1)`, //nolint:errcheck
 		[]uuid.UUID{oldQueued.ID, oldRunning.ID, done.ID})
 
@@ -443,7 +443,7 @@ func TestDeletePublishedBefore(t *testing.T) {
 	a := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
 	createSubmission(t, repo, uuid.New(), "two-sum", time.Now()) // stays PENDING
 
-	repo.ProcessOutboxBatch(ctx, 1, 5, func(context.Context, model.OutboxEvent) error { return nil }) //nolint:errcheck
+	repo.ProcessOutboxBatch(ctx, 1, 5, func(context.Context, model.OutboxEvent) error { return nil })                 //nolint:errcheck
 	pool.Exec(ctx, `UPDATE outbox_events SET published_at = NOW() - INTERVAL '2 days' WHERE aggregate_id = $1`, a.ID) //nolint:errcheck
 
 	n, err := repo.DeletePublishedBefore(ctx, time.Now().Add(-24*time.Hour))
