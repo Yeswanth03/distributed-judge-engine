@@ -9,14 +9,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/broker"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/config"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/handler"
+	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/outbox"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/repository"
 )
 
@@ -51,12 +54,38 @@ func run(cfg config.Config, log *slog.Logger) error {
 	repo := repository.New(pool)
 	log.Info("database ready")
 
+	// The broker is not needed to accept submissions: if it is down, they wait in the outbox. So we do not
+	// wait for it here; the connection comes up (and comes back) in the background.
+	var workers sync.WaitGroup
+	bgCtx, stopBackground := context.WithCancel(context.Background())
+	defer stopBackground()
+	mq := broker.NewConn(cfg.AMQPURL, log.With("component", "broker"), broker.DeclareTopology)
+	workers.Go(func() { mq.Run(bgCtx) })
+
+	relay := outbox.NewRelay(repo, broker.NewPublisher(mq, 10*time.Second), outbox.Options{
+		PollInterval:    cfg.OutboxPollInterval,
+		BatchSize:       cfg.OutboxBatchSize,
+		MaxRetries:      cfg.OutboxMaxRetries,
+		Retention:       cfg.OutboxRetention,
+		CleanupInterval: time.Hour,
+		GaugeInterval:   5 * time.Second,
+		MaxBackoff:      5 * time.Second,
+	}, log.With("component", "outbox"))
+	relayCtx, stopRelay := context.WithCancel(bgCtx)
+	defer stopRelay()
+	var relayDone sync.WaitGroup
+	relayDone.Go(func() { relay.Run(relayCtx) })
+
 	h := handler.New(repo, handler.Options{
 		MaxCodeBytes:     cfg.MaxCodeBytes,
 		AllowedLanguages: cfg.AllowedLanguages,
 		CORSOrigin:       cfg.CORSOrigin,
-		Readiness:        []handler.ReadinessCheck{{Name: "database", Check: repo.Ping}},
-		Logger:           log,
+		NudgeOutbox:      relay.Nudge,
+		Readiness: []handler.ReadinessCheck{
+			{Name: "database", Check: repo.Ping},
+			{Name: "broker", Check: mq.Check},
+		},
+		Logger: log,
 	})
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -81,11 +110,18 @@ func run(cfg config.Config, log *slog.Logger) error {
 	case <-ctx.Done():
 	}
 
-	log.Info("shutting down", "timeout", cfg.ShutdownTimeout)
+	log.Info("shutting down", "timeout", cfg.ShutdownTimeout.String())
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return err
+	// Order matters: stop taking requests first, then let the relay finish its current batch, and only then
+	// close the broker connection it publishes on. Anything not yet published stays PENDING for next time.
+	shutdownErr := srv.Shutdown(shutdownCtx)
+	stopRelay()
+	relayDone.Wait()
+	stopBackground()
+	workers.Wait()
+	if shutdownErr != nil {
+		return shutdownErr
 	}
 	log.Info("shutdown complete")
 	return nil
