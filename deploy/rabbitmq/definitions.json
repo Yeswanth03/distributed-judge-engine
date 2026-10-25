@@ -1,0 +1,57 @@
+{
+  "users": [
+    {
+      "name": "judge",
+      "password_hash": "/IH1jPGe5oeZz2ppBHJ4T1BiCSlDf6lRmTqh6B9lN69nCCGY",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": ["administrator"]
+    }
+  ],
+  "vhosts": [{ "name": "/" }],
+  "permissions": [
+    { "user": "judge", "vhost": "/", "configure": ".*", "write": ".*", "read": ".*" }
+  ],
+  "exchanges": [
+    { "name": "verdict.fanout", "vhost": "/", "type": "fanout", "durable": true, "auto_delete": false, "internal": false, "arguments": {} },
+    { "name": "dead-letter", "vhost": "/", "type": "direct", "durable": true, "auto_delete": false, "internal": false, "arguments": {} }
+  ],
+  "queues": [
+    {
+      "name": "jobs.queue", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 3,
+        "x-dead-letter-exchange": "dead-letter",
+        "x-dead-letter-routing-key": "jobs.dlq"
+      }
+    },
+    { "name": "jobs.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } },
+    {
+      "name": "submission-service.verdict.queue", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 5,
+        "x-dead-letter-exchange": "dead-letter",
+        "x-dead-letter-routing-key": "submission-service.verdict.dlq"
+      }
+    },
+    { "name": "submission-service.verdict.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } },
+    {
+      "name": "catalog-service.verdict.queue", "vhost": "/", "durable": true, "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 5,
+        "x-dead-letter-exchange": "dead-letter",
+        "x-dead-letter-routing-key": "catalog-service.verdict.dlq"
+      }
+    },
+    { "name": "catalog-service.verdict.dlq", "vhost": "/", "durable": true, "auto_delete": false, "arguments": { "x-queue-type": "quorum" } }
+  ],
+  "bindings": [
+    { "source": "verdict.fanout", "vhost": "/", "destination": "submission-service.verdict.queue", "destination_type": "queue", "routing_key": "", "arguments": {} },
+    { "source": "verdict.fanout", "vhost": "/", "destination": "catalog-service.verdict.queue", "destination_type": "queue", "routing_key": "", "arguments": {} },
+    { "source": "dead-letter", "vhost": "/", "destination": "jobs.dlq", "destination_type": "queue", "routing_key": "jobs.dlq", "arguments": {} },
+    { "source": "dead-letter", "vhost": "/", "destination": "submission-service.verdict.dlq", "destination_type": "queue", "routing_key": "submission-service.verdict.dlq", "arguments": {} },
+    { "source": "dead-letter", "vhost": "/", "destination": "catalog-service.verdict.dlq", "destination_type": "queue", "routing_key": "catalog-service.verdict.dlq", "arguments": {} }
+  ]
+}
