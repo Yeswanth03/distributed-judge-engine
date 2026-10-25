@@ -94,8 +94,14 @@ The worker publishes **two** events per job.
 - `error_message`: short text for RE/CE/IE, otherwise `null`. Never put hidden test case data in it.
 - `testset_version`: the Catalog test set version that was judged (optional but recommended).
 
+The **Submission Service also publishes** a `COMPLETED` / `INTERNAL_ERROR` event to `verdict.fanout` when its reaper gives up on a submission the judge never finished:
+- default timeouts: 30 min in `QUEUED`, 5 min in `RUNNING`
+- `error_message`: "The judge did not finish this submission in time. Please submit again."
+
+A late verdict from the judge for that submission is then ignored by the Submission Service.
+
 Consumer rules:
-- **Catalog** ignores every event whose `status` is not `COMPLETED`. Dedupe by `submission_id` (for example a `processed_events` table) so a redelivered verdict does not count twice.
+- **Catalog** ignores every event whose `status` is not `COMPLETED`. Dedupe by `submission_id` (for example a `processed_events` table) so a redelivered verdict does not count twice. Do not count `INTERNAL_ERROR` as a wrong attempt: it is the judge's failure, not the user's.
 - **Submission Service** applies events as a one-way state machine, `QUEUED → RUNNING → COMPLETED`. Late or duplicate events are no-ops.
 
 ## 4. Submission Service HTTP API
