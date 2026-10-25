@@ -111,10 +111,15 @@ Response (also `Location: /api/v1/submissions/{id}`):
 ```json
 { "submission_id": "dc7626b3-...", "status": "QUEUED", "created_at": "2026-10-25T11:00:00Z" }
 ```
-Errors:
-- `400 bad_request`: invalid JSON, unknown language, empty code
+The submitting user is always the `X-User-Id` caller; a `user_id` in the body is ignored.
+
+Errors (same codes as Catalog):
+- `400 bad_request`: malformed JSON
 - `401 unauthorized`: missing or invalid `X-User-Id`
 - `413 payload_too_large`: code over 64 KB
+- `422 validation_failed`: `problem_id` is not a slug (Catalog's rule: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 80 characters), unknown `language`, or empty `code`. The message lists every problem.
+
+Visibility: users see only their own submissions; `X-User-Role: admin` sees all. Someone else's submission answers `404`, not `403`, so IDs cannot be probed.
 
 ### `GET /api/v1/submissions/{id}` → `200 OK`
 ```json
