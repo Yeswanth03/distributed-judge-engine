@@ -254,6 +254,23 @@ func (r *Repository) ProcessOutboxBatch(ctx context.Context, limit, maxRetries i
 	return res, nil
 }
 
+// OutboxCounts is how many events are waiting to be published, and how many gave up.
+type OutboxCounts struct {
+	Pending       int
+	Failed        int
+	OldestPending *time.Time
+}
+
+func (r *Repository) CountOutbox(ctx context.Context) (OutboxCounts, error) {
+	var c OutboxCounts
+	err := r.pool.QueryRow(ctx, `SELECT
+		count(*) FILTER (WHERE status = 'PENDING'),
+		count(*) FILTER (WHERE status = 'FAILED'),
+		min(created_at) FILTER (WHERE status = 'PENDING')
+		FROM outbox_events WHERE status <> 'PUBLISHED'`).Scan(&c.Pending, &c.Failed, &c.OldestPending)
+	return c, err
+}
+
 // DeletePublishedBefore removes published outbox rows older than before; they are only kept for debugging.
 func (r *Repository) DeletePublishedBefore(ctx context.Context, before time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx,
