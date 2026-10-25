@@ -130,7 +130,7 @@ func TestRelayPublishesJobs(t *testing.T) {
 func TestRelayDrainsBurstInOneWakeup(t *testing.T) {
 	store, pub := &fakeStore{}, &fakePublisher{}
 	pub.ready.Store(true)
-	store.add(35) // 4 batches of 10
+	store.add(35)                             // 4 batches of 10
 	r := startRelay(t, store, pub, time.Hour) // polling effectively off
 	r.Nudge()
 	eventually(t, time.Second, func() bool { return pub.count() == 35 }, "burst drained after one nudge")

@@ -28,8 +28,8 @@ func (h *Handler) withClock(now func() time.Time) *Handler {
 
 // fakeStore keeps submissions in memory and mimics the repository's ordering and cursor rules.
 type fakeStore struct {
-	mu        sync.Mutex
-	subs      map[uuid.UUID]*model.Submission
+	mu         sync.Mutex
+	subs       map[uuid.UUID]*model.Submission
 	events     []model.OutboxEvent
 	createErr  error
 	panicOnGet bool

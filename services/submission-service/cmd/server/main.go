@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -31,6 +32,10 @@ func main() {
 	if err != nil {
 		slog.Error("startup failed", "error", err)
 		os.Exit(1)
+	}
+	// `server healthcheck` probes a running server's /healthz: the image is distroless, without curl.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		os.Exit(healthcheck(cfg.HTTPAddr))
 	}
 	log := newLogger(cfg.LogLevel)
 	slog.SetDefault(log)
@@ -181,6 +186,23 @@ func connectDB(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		}
 		backoff = min(backoff*2, 5*time.Second)
 	}
+}
+
+func healthcheck(addr string) int {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 1
+	}
+	client := http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get("http://127.0.0.1:" + port + "/healthz")
+	if err != nil {
+		return 1
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 1
+	}
+	return 0
 }
 
 func newLogger(level string) *slog.Logger {

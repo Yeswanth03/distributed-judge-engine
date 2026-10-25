@@ -33,5 +33,40 @@ services:
       timeout: 5s
       retries: 10
 
+  submission-service:
+    build: ./services/submission-service
+    environment:
+      DATABASE_URL: postgres://submission:submission@postgres:5432/submission?sslmode=disable
+      AMQP_URL: amqp://judge:judge@rabbitmq:5672/
+      # Lets a frontend dev server on another port call the API directly (no gateway locally).
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    ports:
+      # 8082 on the host: Catalog uses 8080 when run from the IDE.
+      - "${SUBMISSION_PORT:-8082}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/server", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Stand-in for the Judge Worker: `docker compose --profile fake-worker up -d`.
+  # Picks verdicts from the code (see services/submission-service/cmd/fakeworker). Leave it off once the
+  # real worker runs, or the two will compete for jobs.
+  fake-worker:
+    build: ./services/submission-service
+    entrypoint: ["/fakeworker"]
+    environment:
+      AMQP_URL: amqp://judge:judge@rabbitmq:5672/
+      FAKE_JUDGE_MS: ${FAKE_JUDGE_MS:-1500}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    profiles: ["fake-worker"]
+
 volumes:
   postgres-data:
