@@ -18,9 +18,12 @@ import (
 
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/broker"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/config"
+	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/consumer"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/handler"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/outbox"
+	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/reaper"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/repository"
+	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/sse"
 )
 
 func main() {
@@ -54,15 +57,22 @@ func run(cfg config.Config, log *slog.Logger) error {
 	repo := repository.New(pool)
 	log.Info("database ready")
 
+	// Background work in two tiers, so shutdown can stop them in order: first the workers (relay, consumers,
+	// reaper), then the broker connection they use.
+	connCtx, stopConn := context.WithCancel(context.Background())
+	defer stopConn()
+	workCtx, stopWork := context.WithCancel(connCtx)
+	defer stopWork()
+	var connDone, workDone sync.WaitGroup
+
 	// The broker is not needed to accept submissions: if it is down, they wait in the outbox. So we do not
 	// wait for it here; the connection comes up (and comes back) in the background.
-	var workers sync.WaitGroup
-	bgCtx, stopBackground := context.WithCancel(context.Background())
-	defer stopBackground()
 	mq := broker.NewConn(cfg.AMQPURL, log.With("component", "broker"), broker.DeclareTopology)
-	workers.Go(func() { mq.Run(bgCtx) })
+	connDone.Go(func() { mq.Run(connCtx) })
+	publisher := broker.NewPublisher(mq, 10*time.Second)
+	hub := sse.NewHub()
 
-	relay := outbox.NewRelay(repo, broker.NewPublisher(mq, 10*time.Second), outbox.Options{
+	relay := outbox.NewRelay(repo, publisher, outbox.Options{
 		PollInterval:    cfg.OutboxPollInterval,
 		BatchSize:       cfg.OutboxBatchSize,
 		MaxRetries:      cfg.OutboxMaxRetries,
@@ -71,16 +81,29 @@ func run(cfg config.Config, log *slog.Logger) error {
 		GaugeInterval:   5 * time.Second,
 		MaxBackoff:      5 * time.Second,
 	}, log.With("component", "outbox"))
-	relayCtx, stopRelay := context.WithCancel(bgCtx)
-	defer stopRelay()
-	var relayDone sync.WaitGroup
-	relayDone.Go(func() { relay.Run(relayCtx) })
+	dbConsumer := &consumer.DBConsumer{
+		Conn: mq, Store: repo, Queue: broker.VerdictQueue, Prefetch: 20, Workers: 4,
+		Log: log.With("component", "verdict-consumer"),
+	}
+	sseConsumer := &consumer.SSEConsumer{
+		Conn: mq, Hub: hub, Exchange: broker.VerdictExchange, Log: log.With("component", "sse-consumer"),
+	}
+	stuck := reaper.New(repo, publisher, hub, reaper.Options{
+		Interval:       cfg.ReaperInterval,
+		QueuedTimeout:  cfg.ReaperQueuedTimeout,
+		RunningTimeout: cfg.ReaperRunningTimeout,
+		Exchange:       broker.VerdictExchange,
+	}, log.With("component", "reaper"))
+	for _, run := range []func(context.Context){relay.Run, dbConsumer.Run, sseConsumer.Run, stuck.Run} {
+		workDone.Go(func() { run(workCtx) })
+	}
 
 	h := handler.New(repo, handler.Options{
 		MaxCodeBytes:     cfg.MaxCodeBytes,
 		AllowedLanguages: cfg.AllowedLanguages,
 		CORSOrigin:       cfg.CORSOrigin,
 		NudgeOutbox:      relay.Nudge,
+		Hub:              hub,
 		Readiness: []handler.ReadinessCheck{
 			{Name: "database", Check: repo.Ping},
 			{Name: "broker", Check: mq.Check},
@@ -94,6 +117,9 @@ func run(cfg config.Config, log *slog.Logger) error {
 		IdleTimeout:       120 * time.Second,
 		// No WriteTimeout: SSE responses stay open until the verdict arrives.
 	}
+	// Shutdown waits for in-flight requests, and an SSE stream would otherwise keep it waiting until the
+	// timeout. Closing the hub ends the streams; browsers reconnect to another replica.
+	srv.RegisterOnShutdown(hub.Close)
 
 	serveErr := make(chan error, 1)
 	go func() {
@@ -113,13 +139,14 @@ func run(cfg config.Config, log *slog.Logger) error {
 	log.Info("shutting down", "timeout", cfg.ShutdownTimeout.String())
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	// Order matters: stop taking requests first, then let the relay finish its current batch, and only then
-	// close the broker connection it publishes on. Anything not yet published stays PENDING for next time.
+	// Order matters: stop taking requests (and end SSE streams) first, then let the workers finish what they
+	// hold (the relay its batch, the consumers their unacked messages), and only then close the broker
+	// connection they use. Unpublished events stay PENDING; unacked messages go back to the queue.
 	shutdownErr := srv.Shutdown(shutdownCtx)
-	stopRelay()
-	relayDone.Wait()
-	stopBackground()
-	workers.Wait()
+	stopWork()
+	workDone.Wait()
+	stopConn()
+	connDone.Wait()
 	if shutdownErr != nil {
 		return shutdownErr
 	}

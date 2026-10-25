@@ -12,6 +12,7 @@ import (
 
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/model"
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/repository"
+	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/sse"
 )
 
 // Store is the part of the repository the handlers use.
@@ -35,9 +36,11 @@ type Options struct {
 	// Optional; it must not block.
 	NudgeOutbox func()
 	Readiness   []ReadinessCheck
-	// Events serves GET /api/v1/submissions/{id}/events (SSE). Optional.
-	Events http.Handler
-	Logger *slog.Logger
+	// Hub feeds GET /api/v1/submissions/{id}/events (SSE); without one the route is not served.
+	Hub *sse.Hub
+	// Heartbeat is how often an idle SSE stream sends a keep-alive comment (default 15s).
+	Heartbeat time.Duration
+	Logger    *slog.Logger
 }
 
 type Handler struct {
@@ -59,6 +62,9 @@ func New(store Store, opts Options) *Handler {
 	if h.opts.NudgeOutbox == nil {
 		h.opts.NudgeOutbox = func() {}
 	}
+	if h.opts.Heartbeat <= 0 {
+		h.opts.Heartbeat = 15 * time.Second
+	}
 	return h
 }
 
@@ -68,8 +74,8 @@ func (h *Handler) Routes(metrics http.Handler) http.Handler {
 	mux.HandleFunc("POST /api/v1/submissions", h.submit)
 	mux.HandleFunc("GET /api/v1/submissions", h.list)
 	mux.HandleFunc("GET /api/v1/submissions/{id}", h.get)
-	if h.opts.Events != nil {
-		mux.Handle("GET /api/v1/submissions/{id}/events", h.opts.Events)
+	if h.opts.Hub != nil {
+		mux.HandleFunc("GET /api/v1/submissions/{id}/events", h.events)
 	}
 	mux.HandleFunc("GET /healthz", h.healthz)
 	mux.HandleFunc("GET /readyz", h.readyz)

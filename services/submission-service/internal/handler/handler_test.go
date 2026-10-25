@@ -30,8 +30,16 @@ func (h *Handler) withClock(now func() time.Time) *Handler {
 type fakeStore struct {
 	mu        sync.Mutex
 	subs      map[uuid.UUID]*model.Submission
-	events    []model.OutboxEvent
-	createErr error
+	events     []model.OutboxEvent
+	createErr  error
+	panicOnGet bool
+}
+
+// set replaces a stored submission's state, as the verdict consumer would.
+func (f *fakeStore) set(id uuid.UUID, mutate func(*model.Submission)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	mutate(f.subs[id])
 }
 
 func newFakeStore() *fakeStore { return &fakeStore{subs: map[uuid.UUID]*model.Submission{}} }
@@ -52,6 +60,9 @@ func (f *fakeStore) CreateSubmissionWithOutbox(_ context.Context, s *model.Submi
 func (f *fakeStore) GetSubmissionByID(_ context.Context, id uuid.UUID) (*model.Submission, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.panicOnGet {
+		panic("boom")
+	}
 	s, ok := f.subs[id]
 	if !ok {
 		return nil, repository.ErrNotFound
@@ -392,24 +403,7 @@ func TestCORS(t *testing.T) {
 }
 
 func TestPanicBecomes500(t *testing.T) {
-	ts := newTestServer(t, func(o *Options) {
-		o.Events = http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })
-	})
-	expectError(t, ts.do(t, "GET", "/api/v1/submissions/"+uuid.NewString()+"/events", &alice, ""), 500, "internal_error")
-}
-
-func TestStatusRecorderKeepsFlusher(t *testing.T) {
-	flushed := false
-	ts := newTestServer(t, func(o *Options) {
-		o.Events = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if err := http.NewResponseController(w).Flush(); err != nil {
-				t.Errorf("flush through middleware: %v", err)
-			}
-			flushed = true
-		})
-	})
-	rec := ts.do(t, "GET", "/api/v1/submissions/"+uuid.NewString()+"/events", &alice, "")
-	if !flushed || !rec.Flushed {
-		t.Fatal("SSE handlers must be able to flush through the middleware chain")
-	}
+	ts := newTestServer(t)
+	ts.store.panicOnGet = true
+	expectError(t, ts.do(t, "GET", "/api/v1/submissions/"+uuid.NewString(), &alice, ""), 500, "internal_error")
 }
