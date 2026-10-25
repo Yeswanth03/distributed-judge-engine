@@ -1,2 +1,5 @@
 ### IntelliJ IDEA ###
 .idea/
+
+# Local overrides for docker compose (ports etc.)
+.env
