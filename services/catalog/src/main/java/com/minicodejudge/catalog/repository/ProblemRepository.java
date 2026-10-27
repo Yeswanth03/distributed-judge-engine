@@ -90,6 +90,21 @@ public class ProblemRepository {
                 .update();
     }
 
+    // ---- internal (judge) reads ----
+
+    /** What the judge needs from the problem row; currentVersion is null until the first publish. */
+    public record JudgeLimits(@Nullable Integer currentVersion, int timeLimitMs, int memoryLimitMb) {}
+
+    public Optional<JudgeLimits> findJudgeLimits(UUID id) {
+        return jdbc.sql("SELECT current_version, time_limit_ms, memory_limit_mb FROM problems WHERE id = :id")
+                .param("id", id)
+                .query((rs, rowNum) -> new JudgeLimits(
+                        rs.getObject("current_version", Integer.class),
+                        rs.getInt("time_limit_ms"),
+                        rs.getInt("memory_limit_mb")))
+                .optional();
+    }
+
     // ---- public reads ----
 
     /** A published problem plus the version its samples come from (never null once published). */

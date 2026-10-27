@@ -1,5 +1,6 @@
 package com.minicodejudge.catalog.repository;
 
+import com.minicodejudge.catalog.dto.InternalDtos.InternalCase;
 import com.minicodejudge.catalog.dto.ProblemDtos.Sample;
 import com.minicodejudge.catalog.dto.TestsetDtos.CaseRequest;
 import java.util.List;
@@ -56,6 +57,34 @@ public class TestsetRepository {
                 .param("version", version)
                 .query(String.class)
                 .optional();
+    }
+
+    /** The status and content hash of one version, or empty if the problem has no such version. */
+    public record TestsetInfo(String status, String contentHash) {}
+
+    public Optional<TestsetInfo> findInfo(UUID problemId, int version) {
+        return jdbc.sql("SELECT status, content_hash FROM testsets WHERE problem_id = :problemId AND version = :version")
+                .param("problemId", problemId)
+                .param("version", version)
+                .query((rs, rowNum) -> new TestsetInfo(rs.getString("status"), rs.getString("content_hash")))
+                .optional();
+    }
+
+    /** Every case of one version, hidden and sample, in judging order. Only the internal route may expose these. */
+    public List<InternalCase> findAllCases(UUID problemId, int version) {
+        return jdbc.sql("""
+                SELECT ordinal, input, expected_output, is_sample FROM test_cases
+                 WHERE problem_id = :problemId AND testset_version = :version
+                 ORDER BY ordinal
+                """)
+                .param("problemId", problemId)
+                .param("version", version)
+                .query((rs, rowNum) -> new InternalCase(
+                        rs.getInt("ordinal"),
+                        rs.getString("input"),
+                        rs.getString("expected_output"),
+                        rs.getBoolean("is_sample")))
+                .list();
     }
 
     /** The sample cases of one version, in judging order. Hidden cases are never selected here. */
