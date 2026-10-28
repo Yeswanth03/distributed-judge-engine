@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -21,6 +23,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<ApiError> notFound(NotFoundException e) {
         return build(HttpStatus.NOT_FOUND, "not_found", e.getMessage());
+    }
+
+    /** A URL no endpoint matches, e.g. a typo such as /admin/problemz. */
+    @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
+    public ResponseEntity<ApiError> noSuchEndpoint() {
+        return build(HttpStatus.NOT_FOUND, "not_found", "no such endpoint");
     }
 
     @ExceptionHandler(ConflictException.class)
