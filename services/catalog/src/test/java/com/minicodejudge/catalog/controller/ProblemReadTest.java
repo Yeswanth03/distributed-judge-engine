@@ -45,7 +45,7 @@ class ProblemReadTest {
 
     @BeforeEach
     void emptyTables() {
-        jdbc.sql("TRUNCATE test_cases, testsets, problems").update();
+        jdbc.sql("TRUNCATE test_cases, testsets, problems CASCADE").update();
     }
 
     // ---- GET /problems/{slug} ----

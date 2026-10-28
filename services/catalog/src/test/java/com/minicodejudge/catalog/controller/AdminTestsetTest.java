@@ -51,7 +51,7 @@ class AdminTestsetTest {
     /** TRUNCATE skips the row-level immutability triggers, so published rows from earlier tests are cleared too. */
     @BeforeEach
     void seedDraftProblem() {
-        jdbc.sql("TRUNCATE test_cases, testsets, problems").update();
+        jdbc.sql("TRUNCATE test_cases, testsets, problems CASCADE").update();
         problemId = UUID.randomUUID();
         jdbc.sql("""
                 INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
