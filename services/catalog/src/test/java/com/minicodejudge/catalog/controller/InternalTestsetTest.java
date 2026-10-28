@@ -46,7 +46,7 @@ class InternalTestsetTest {
     /** A problem whose version 1 is published, with one sample case and one hidden case. */
     @BeforeEach
     void seedPublishedProblem() {
-        jdbc.sql("TRUNCATE test_cases, testsets, problems").update();
+        jdbc.sql("TRUNCATE test_cases, testsets, problems CASCADE").update();
         problemId = UUID.randomUUID();
         jdbc.sql("""
                 INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
