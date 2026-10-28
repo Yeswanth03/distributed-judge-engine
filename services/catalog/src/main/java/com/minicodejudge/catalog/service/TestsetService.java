@@ -1,5 +1,6 @@
 package com.minicodejudge.catalog.service;
 
+import com.minicodejudge.catalog.dto.AdminDtos.TestsetVersion;
 import com.minicodejudge.catalog.dto.InternalDtos.InternalTestset;
 import com.minicodejudge.catalog.dto.TestsetDtos.CaseRequest;
 import com.minicodejudge.catalog.dto.TestsetDtos.TestsetCreated;
@@ -71,6 +72,13 @@ public class TestsetService {
         }
         testsets.markPublished(problemId, version);
         problems.markPublished(problemId, version);
+    }
+
+    /** Every version of a problem's test set, newest first, drafts included, marking the current one. */
+    public List<TestsetVersion> listVersions(UUID problemId) {
+        JudgeLimits problem = problems.findJudgeLimits(problemId)
+                .orElseThrow(() -> new NotFoundException("problem not found"));
+        return testsets.listVersions(problemId, problem.currentVersion());
     }
 
     /**

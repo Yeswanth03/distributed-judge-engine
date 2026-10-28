@@ -36,8 +36,8 @@ public class LeaderboardService {
      */
     @Transactional
     public boolean apply(VerdictEvent event) {
-        if (!repo.problemExists(event.problemId())) {
-            throw new InvalidVerdictException("unknown problem " + event.problemId());
+        if (!repo.problemPublished(event.problemId())) {
+            throw new InvalidVerdictException("problem " + event.problemId() + " does not exist or is not published");
         }
         repo.lockUser(event.userId());
         if (repo.upsertResult(event) == 0) {

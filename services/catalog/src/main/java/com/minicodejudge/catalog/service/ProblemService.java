@@ -1,5 +1,8 @@
 package com.minicodejudge.catalog.service;
 
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemPage;
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemSummary;
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemView;
 import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
 import com.minicodejudge.catalog.dto.ProblemDtos.ProblemPage;
 import com.minicodejudge.catalog.dto.ProblemDtos.ProblemSummary;
@@ -83,5 +86,21 @@ public class ProblemService {
         }
         List<ProblemSummary> page = List.copyOf(rows.subList(0, limit));
         return new ProblemPage(page, page.getLast().slug());
+    }
+
+    // ---- admin reads (drafts included) ----
+
+    /** One page of all problems, drafts included, in slug order; optionally only one status. */
+    public AdminProblemPage listForAdmin(@Nullable String status, int limit, @Nullable String cursor) {
+        List<AdminProblemSummary> rows = repo.listAll(status, cursor, limit + 1);
+        if (rows.size() <= limit) {
+            return new AdminProblemPage(rows, null);
+        }
+        List<AdminProblemSummary> page = List.copyOf(rows.subList(0, limit));
+        return new AdminProblemPage(page, page.getLast().slug());
+    }
+
+    public AdminProblemView getForAdmin(UUID id) {
+        return repo.findForAdmin(id).orElseThrow(() -> new NotFoundException("problem not found"));
     }
 }

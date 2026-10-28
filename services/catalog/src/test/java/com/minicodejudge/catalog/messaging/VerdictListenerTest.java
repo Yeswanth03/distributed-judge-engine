@@ -49,8 +49,8 @@ class VerdictListenerTest {
         jdbc.sql("TRUNCATE results, user_problem_status, user_scores, test_cases, testsets, problems").update();
         problemId = UUID.randomUUID();
         jdbc.sql("""
-                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
-                VALUES (:id, 'two-sum', 'Two Sum', 'Statement.', 'easy', 100, 1000, 256)
+                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb, status)
+                VALUES (:id, 'two-sum', 'Two Sum', 'Statement.', 'easy', 100, 1000, 256, 'published')
                 """)
                 .param("id", problemId)
                 .update();

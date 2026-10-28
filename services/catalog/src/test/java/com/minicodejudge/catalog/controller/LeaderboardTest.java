@@ -105,9 +105,15 @@ class LeaderboardTest {
     }
 
     @Test
-    void verdictForAnUnknownProblemIsRejected() {
+    void verdictForAnUnknownOrDraftProblemIsRejected() {
         assertThatThrownBy(() -> leaderboard.apply(verdict(UUID.randomUUID(), "alice", UUID.randomUUID(), "accepted", 0, T0)))
                 .isInstanceOf(InvalidVerdictException.class);
+
+        jdbc.sql("UPDATE problems SET status = 'draft' WHERE id = :id").param("id", easy).update();
+        assertThatThrownBy(() -> leaderboard.apply(verdict(UUID.randomUUID(), "alice", easy, "accepted", 0, T0)))
+                .isInstanceOf(InvalidVerdictException.class)
+                .hasMessageContaining("not published");
+        assertThat(jdbc.sql("SELECT count(*) FROM user_scores").query(Integer.class).single()).isZero();
     }
 
     @Test
@@ -169,8 +175,8 @@ class LeaderboardTest {
     private UUID problem(String slug, int points) {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
-                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
-                VALUES (:id, :slug, :slug, 'Statement.', 'easy', :points, 1000, 256)
+                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb, status)
+                VALUES (:id, :slug, :slug, 'Statement.', 'easy', :points, 1000, 256, 'published')
                 """)
                 .param("id", id).param("slug", slug).param("points", points)
                 .update();

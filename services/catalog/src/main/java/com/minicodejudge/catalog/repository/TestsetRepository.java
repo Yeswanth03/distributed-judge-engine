@@ -1,11 +1,14 @@
 package com.minicodejudge.catalog.repository;
 
+import com.minicodejudge.catalog.dto.AdminDtos.TestsetVersion;
 import com.minicodejudge.catalog.dto.InternalDtos.InternalCase;
 import com.minicodejudge.catalog.dto.ProblemDtos.Sample;
 import com.minicodejudge.catalog.dto.TestsetDtos.CaseRequest;
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -57,6 +60,35 @@ public class TestsetRepository {
                 .param("version", version)
                 .query(String.class)
                 .optional();
+    }
+
+    /** Every version of a problem's test set, newest first, with case counts. */
+    public List<TestsetVersion> listVersions(UUID problemId, @Nullable Integer currentVersion) {
+        return jdbc.sql("""
+                SELECT t.version, t.status, t.content_hash, t.created_at, t.published_at,
+                       count(c.id)::int AS case_count,
+                       (count(c.id) FILTER (WHERE c.is_sample))::int AS sample_count
+                  FROM testsets t
+                  LEFT JOIN test_cases c ON c.problem_id = t.problem_id AND c.testset_version = t.version
+                 WHERE t.problem_id = :problemId
+                 GROUP BY t.problem_id, t.version
+                 ORDER BY t.version DESC
+                """)
+                .param("problemId", problemId)
+                .query((rs, rowNum) -> {
+                    int version = rs.getInt("version");
+                    Timestamp publishedAt = rs.getTimestamp("published_at");
+                    return new TestsetVersion(
+                            version,
+                            rs.getString("status"),
+                            currentVersion != null && currentVersion == version,
+                            rs.getString("content_hash"),
+                            rs.getInt("case_count"),
+                            rs.getInt("sample_count"),
+                            rs.getTimestamp("created_at").toInstant(),
+                            publishedAt == null ? null : publishedAt.toInstant());
+                })
+                .list();
     }
 
     /** The status and content hash of one version, or empty if the problem has no such version. */

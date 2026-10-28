@@ -1,5 +1,7 @@
 package com.minicodejudge.catalog.repository;
 
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemSummary;
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemView;
 import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
 import com.minicodejudge.catalog.dto.ProblemDtos.ProblemSummary;
 import com.minicodejudge.catalog.dto.ProblemDtos.UpdateProblemRequest;
@@ -156,5 +158,56 @@ public class ProblemRepository {
                         rs.getString("difficulty"),
                         rs.getInt("points")))
                 .list();
+    }
+
+    // ---- admin reads (drafts included) ----
+
+    /** Every problem, drafts included, in slug order after {@code afterSlug}; optionally one status only. */
+    public List<AdminProblemSummary> listAll(@Nullable String status, @Nullable String afterSlug, int limit) {
+        return jdbc.sql("""
+                SELECT id, slug, title, difficulty, points, status, current_version, updated_at
+                  FROM problems
+                 WHERE (CAST(:status AS TEXT) IS NULL OR status = :status)
+                   AND (CAST(:after AS TEXT) IS NULL OR slug > :after)
+                 ORDER BY slug
+                 LIMIT :limit
+                """)
+                .param("status", status)
+                .param("after", afterSlug)
+                .param("limit", limit)
+                .query((rs, rowNum) -> new AdminProblemSummary(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("slug"),
+                        rs.getString("title"),
+                        rs.getString("difficulty"),
+                        rs.getInt("points"),
+                        rs.getString("status"),
+                        rs.getObject("current_version", Integer.class),
+                        rs.getTimestamp("updated_at").toInstant()))
+                .list();
+    }
+
+    public Optional<AdminProblemView> findForAdmin(UUID id) {
+        return jdbc.sql("""
+                SELECT id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,
+                       status, current_version, created_at, updated_at
+                  FROM problems
+                 WHERE id = :id
+                """)
+                .param("id", id)
+                .query((rs, rowNum) -> new AdminProblemView(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("slug"),
+                        rs.getString("title"),
+                        rs.getString("statement_md"),
+                        rs.getString("difficulty"),
+                        rs.getInt("points"),
+                        rs.getInt("time_limit_ms"),
+                        rs.getInt("memory_limit_mb"),
+                        rs.getString("status"),
+                        rs.getObject("current_version", Integer.class),
+                        rs.getTimestamp("created_at").toInstant(),
+                        rs.getTimestamp("updated_at").toInstant()))
+                .optional();
     }
 }

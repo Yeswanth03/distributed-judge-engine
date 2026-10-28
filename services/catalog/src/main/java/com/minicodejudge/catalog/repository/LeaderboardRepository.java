@@ -89,8 +89,9 @@ public class LeaderboardRepository {
                 .update();
     }
 
-    public boolean problemExists(UUID problemId) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM problems WHERE id = :id)")
+    /** Only published problems can be judged, so only they may score. */
+    public boolean problemPublished(UUID problemId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM problems WHERE id = :id AND status = 'published')")
                 .param("id", problemId)
                 .query(Boolean.class)
                 .single();
