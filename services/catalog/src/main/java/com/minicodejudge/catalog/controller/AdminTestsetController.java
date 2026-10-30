@@ -1,5 +1,6 @@
 package com.minicodejudge.catalog.controller;
 
+import com.minicodejudge.catalog.dto.AdminDtos.TestsetVersion;
 import com.minicodejudge.catalog.dto.ApiError;
 import com.minicodejudge.catalog.dto.TestsetDtos.TestsetCreated;
 import com.minicodejudge.catalog.dto.TestsetDtos.TestsetRequest;
@@ -12,9 +13,11 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,13 +28,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/admin/problems/{id}/testsets")
 @Tag(name = "Admin: test sets",
-        description = "Upload versioned test cases and publish them. Needs X-User-Role: admin.")
+        description = "List, upload and publish versioned test cases. Needs X-User-Role: admin.")
 public class AdminTestsetController {
 
     private final TestsetService service;
 
     public AdminTestsetController(TestsetService service) {
         this.service = service;
+    }
+
+    @GetMapping
+    @Operation(summary = "List a problem's test set versions",
+            description = "Newest first, drafts included, with case counts; current = the version the judge uses.")
+    @ApiResponse(responseCode = "200", description = "The versions (empty before the first upload)")
+    @ApiResponse(responseCode = "400", description = "id is not a UUID", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"bad_request\",\"message\":\"invalid value for id\"}")))
+    @ApiResponse(responseCode = "403", description = "Missing admin role", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"forbidden\",\"message\":\"admin role required\"}")))
+    @ApiResponse(responseCode = "404", description = "No problem with this id", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"not_found\",\"message\":\"problem not found\"}")))
+    public List<TestsetVersion> versions(
+            @Parameter(description = "Problem id returned by create") @PathVariable("id") UUID id) {
+        return service.listVersions(id);
     }
 
     @PostMapping
