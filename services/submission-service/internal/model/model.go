@@ -80,7 +80,7 @@ type JobMessage struct {
 	SubmittedAt  time.Time `json:"submitted_at"`
 }
 
-// StatusEvent is what the Judge Worker publishes to verdict.fanout: a RUNNING event when it starts a job,
+// StatusEvent is what the Judge Worker publishes to the verdicts exchange: a RUNNING event when it starts a job,
 // and a COMPLETED event carrying the verdict when it finishes. The Submission Service also emits it to its
 // own SSE clients when the reaper gives up on a submission.
 type StatusEvent struct {

@@ -2,9 +2,11 @@
 // side of docs/contracts.md exactly, without running any code:
 //
 //  1. take a job from jobs.queue (manual ack, prefetch 1)
-//  2. publish RUNNING to verdict.fanout
+//  2. publish RUNNING to the verdicts exchange
 //  3. "judge" for a moment; the verdict is chosen from the code so each outcome can be demoed
 //  4. publish the verdict (with publisher confirms), and only then ack the job
+//
+// Everything goes out under broker.StatusRoutingKey, so made-up results never reach Catalog's leaderboard.
 //
 // Verdicts: code containing "while True" → TIME_LIMIT_EXCEEDED, "MemoryError" → MEMORY_LIMIT_EXCEEDED,
 // "raise" → RUNTIME_ERROR, "wrong" → WRONG_ANSWER, anything else → ACCEPTED.
@@ -150,7 +152,7 @@ func publish(ctx context.Context, pub *broker.Publisher, ev model.StatusEvent) e
 	if err != nil {
 		return err
 	}
-	return pub.Publish(ctx, broker.VerdictExchange, "", amqp.Publishing{
+	return pub.Publish(ctx, broker.VerdictExchange, broker.StatusRoutingKey, amqp.Publishing{
 		ContentType: "application/json", MessageId: ev.SubmissionID.String(), Timestamp: time.Now(), Body: body,
 	})
 }

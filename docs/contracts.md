@@ -16,12 +16,21 @@ Declared once in [deploy/rabbitmq/definitions.json](../deploy/rabbitmq/definitio
 |---|---|---|
 | `jobs.queue` | quorum queue, `x-delivery-limit: 3` | Jobs for the Judge Worker. Published through the default exchange with routing key `jobs.queue`. |
 | `jobs.dlq` | quorum queue | Jobs that were redelivered more than 3 times (crashing or poison jobs). |
-| `verdict.fanout` | fanout exchange | Submission status events from the worker, copied to every bound queue. |
-| `submission-service.verdict.queue` | quorum queue, bound to `verdict.fanout` | Submission Service writes events to its DB. |
-| `catalog-service.verdict.queue` | quorum queue, bound to `verdict.fanout` | Catalog updates solves and the leaderboard. |
-| `*.dlq` + `dead-letter` exchange | | Rejected or over-delivered messages, for inspection. |
+| `verdicts` | topic exchange | Submission status events, copied to every queue whose binding matches. |
+| `submission-service.verdict.queue` | quorum queue, bound to `verdicts` on `#` | Submission Service writes events to its DB. |
+| `catalog.verdicts` | classic queue, bound to `verdicts` on `verdict.#` | Catalog updates solves and the leaderboard. |
+| `submission-service.verdict.dlq`, `jobs.dlq` + `dead-letter` exchange | | Rejected or over-delivered messages, for inspection. |
+| `catalog.verdicts.dlq` + `verdicts.dlx` exchange | | The same for Catalog. |
 
-The Submission Service also creates one **exclusive, auto-delete** queue per running instance, bound to `verdict.fanout`. It feeds that instance's live SSE connections, so the browser gets updates whichever instance it is connected to.
+Routing keys on `verdicts`:
+
+| Key | Sent by | Received by |
+|---|---|---|
+| `verdict.<verdict>`, lowercase (`verdict.accepted`) | Judge Worker, finished jobs | Submission Service, Catalog |
+| `status.running` | Judge Worker, started jobs | Submission Service |
+| `status.update` | Reaper and fake worker | Submission Service |
+
+The Submission Service also creates one **exclusive, auto-delete** queue per running instance, bound to `verdicts` on `#`. It feeds that instance's live SSE connections, so the browser gets updates whichever instance it is connected to.
 
 All messages are persistent (`delivery_mode=2`), `content_type=application/json`, with `message_id` set to the `submission_id`.
 
@@ -51,7 +60,7 @@ Worker rules:
 - Ack the job only **after** the final event below has been published (with publisher confirms).
 - If the worker crashes mid-job, RabbitMQ redelivers it. After 3 deliveries the job goes to `jobs.dlq`, and the Submission Service's reaper eventually marks the submission `INTERNAL_ERROR`.
 
-## 3. Status events: Judge Worker → `verdict.fanout`
+## 3. Status events: Judge Worker → `verdicts`
 
 The worker publishes **two** events per job.
 
@@ -70,7 +79,7 @@ The worker publishes **two** events per job.
 {
   "submission_id": "dc7626b3-f4e7-4194-a625-300911712913",
   "user_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  "problem_id": "two-sum",
+  "problem_id": "11111111-1111-1111-1111-111111111111",
   "status": "COMPLETED",
   "verdict": "ACCEPTED",
   "execution_time_ms": 38,
@@ -78,9 +87,13 @@ The worker publishes **two** events per job.
   "test_cases_passed": 55,
   "total_test_cases": 55,
   "error_message": null,
-  "testset_version": 3
+  "testset_version": 3,
+  "rejudge_seq": 0,
+  "judged_at": "2026-10-25T11:00:02Z"
 }
 ```
+
+- `problem_id` is the Catalog **UUID** in this event, which is what Catalog's leaderboard needs. The worker looks it up with `GET /problems/{slug}`. The Submission Service identifies submissions by `submission_id` and doesn't read this field.
 
 - `status` is one of `RUNNING` or `COMPLETED`.
 - `verdict` is one of:
@@ -92,16 +105,16 @@ The worker publishes **two** events per job.
   - `COMPILATION_ERROR`
   - `INTERNAL_ERROR` (judge failure, not the user's fault)
 - `error_message`: short text for RE/CE/IE, otherwise `null`. Never put hidden test case data in it.
-- `testset_version`: the Catalog test set version that was judged (optional but recommended).
+- `testset_version`, `rejudge_seq`, `judged_at`: required by Catalog. `rejudge_seq` stays `0` until re-judging is built.
 
-The **Submission Service also publishes** a `COMPLETED` / `INTERNAL_ERROR` event to `verdict.fanout` when its reaper gives up on a submission the judge never finished:
+The **Submission Service also publishes** a `COMPLETED` / `INTERNAL_ERROR` event to `verdicts`, with routing key `status.update`, when its reaper gives up on a submission the judge never finished:
 - default timeouts: 30 min in `QUEUED`, 5 min in `RUNNING`
 - `error_message`: "The judge did not finish this submission in time. Please submit again."
 
 A late verdict from the judge for that submission is then ignored by the Submission Service.
 
 Consumer rules:
-- **Catalog** ignores every event whose `status` is not `COMPLETED`. Dedupe by `submission_id` (for example a `processed_events` table) so a redelivered verdict does not count twice. Do not count `INTERNAL_ERROR` as a wrong attempt: it is the judge's failure, not the user's.
+- **Catalog** only receives `verdict.*` messages, so it never sees `RUNNING` events or the reaper's `INTERNAL_ERROR`. A redelivered verdict must not count twice (it compares `rejudge_seq` per submission).
 - **Submission Service** applies events as a one-way state machine, `QUEUED → RUNNING → COMPLETED`. Late or duplicate events are no-ops.
 
 ## 4. Submission Service HTTP API
@@ -178,4 +191,4 @@ Frontend: use `EventSource`, and call `close()` after the `verdict` event. Other
 
 ## 5. Judge Worker → Catalog
 
-The worker fetches hidden test cases from Catalog's `/internal/...` endpoint with `X-Service-Token` (owned by the Catalog team, see their Swagger at `/swagger-ui.html`). Published test sets are immutable, so the worker can cache them by `(problem, testset_version)`.
+The worker turns the job's slug into the problem's UUID with the public `GET /problems/{slug}`, then fetches hidden test cases from Catalog's `/internal/...` endpoint with `X-Service-Token` (owned by the Catalog team, see their Swagger at `/swagger-ui.html`). Published test sets are immutable, so the worker can cache them by `(problem, testset_version)`.

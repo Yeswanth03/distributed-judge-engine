@@ -10,9 +10,9 @@ The message and HTTP contracts with the other services are in [docs/contracts.md
 POST /submissions ──► Postgres (one transaction) ──► outbox relay ──► jobs.queue ──► Judge Worker
                       submissions + outbox_events                                       │
                                                                                          ▼
-browser ◄── SSE ◄── hub ◄── private queue per replica ◄──┐                     verdict.fanout
+browser ◄── SSE ◄── hub ◄── private queue per replica ◄──┐                 verdicts (topic exchange)
                                                           ├────────────────────────────┤
-Postgres ◄── guarded UPDATE ◄── shared verdict queue ◄────┘                  catalog-service.verdict.queue
+Postgres ◄── guarded UPDATE ◄── shared verdict queue ◄────┘                  catalog.verdicts (verdict.#)
 ```
 
 | Concern | How it is handled | Code |
@@ -21,7 +21,7 @@ Postgres ◄── guarded UPDATE ◄── shared verdict queue ◄────
 | Delivery is at-least-once, so duplicates happen | **Idempotent, forward-only updates.** `QUEUED → RUNNING → COMPLETED` is enforced in SQL (`WHERE status IN (...)`). A duplicate or late event changes nothing, and the first verdict wins. | [repository](internal/repository/postgres.go) |
 | Several replicas | The outbox claims rows with `FOR UPDATE SKIP LOCKED`. One durable queue is shared by all replicas for DB writes. Each replica has its own exclusive queue for live updates, so a browser gets events whichever replica it is connected to. Migrations run under an advisory lock. | [consumer](internal/consumer/consumer.go) |
 | No lost or stale live updates | The stream subscribes before reading the current state. After a broker reconnect, every open stream re-reads the database. | [events](internal/handler/events.go), [hub](internal/sse/hub.go) |
-| Judge never answers | **Reaper.** Submissions stuck in `QUEUED` (30 min) or `RUNNING` (5 min) are completed as `INTERNAL_ERROR` and announced on `verdict.fanout`. | [reaper](internal/reaper/reaper.go) |
+| Judge never answers | **Reaper.** Submissions stuck in `QUEUED` (30 min) or `RUNNING` (5 min) are completed as `INTERNAL_ERROR` and announced on the `verdicts` exchange. | [reaper](internal/reaper/reaper.go) |
 | Bad messages | Malformed events go to `submission-service.verdict.dlq`. Database errors are retried in place with backoff, so they do not burn the queue's delivery limit. | [consumer](internal/consumer/consumer.go) |
 
 ## Run it
@@ -115,6 +115,6 @@ When `TEST_DATABASE_URL` or `TEST_AMQP_URL` is set (as in CI), an unreachable de
 ## Demos (for the report)
 
 1. **Broker outage.** Run `docker compose stop rabbitmq`, submit a few times (all `202`, `/readyz` is `503`, `outbox_pending_events` rises), then run `docker compose start rabbitmq`. The outbox drains on its own, with no retries used and no submission lost.
-2. **Idempotency.** Publish the same verdict twice to `verdict.fanout` (the RabbitMQ UI → Exchanges → Publish message). The row keeps the first one, and `verdict_events_total{result="duplicate"}` goes up.
+2. **Idempotency.** Publish the same verdict twice to the `verdicts` exchange with routing key `status.update` (the RabbitMQ UI → Exchanges → Publish message). The row keeps the first one, and `verdict_events_total{result="duplicate"}` goes up.
 3. **Replicas.** Run two instances, submit through one, and stream from the other. The client still gets every event.
 4. **Stuck judge.** Set `REAPER_RUNNING_TIMEOUT=5s`, publish only a `RUNNING` event, and the stream ends with `INTERNAL_ERROR` about 5 s later.

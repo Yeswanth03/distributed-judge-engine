@@ -33,6 +33,7 @@ type Options struct {
 	QueuedTimeout  time.Duration
 	RunningTimeout time.Duration
 	Exchange       string // broker.VerdictExchange
+	RoutingKey     string // broker.StatusRoutingKey
 }
 
 type Reaper struct {
@@ -76,11 +77,12 @@ func (r *Reaper) ReapOnce(ctx context.Context) int {
 		ev := model.EventFromSubmission(s)
 		r.log.Warn("reaped stuck submission", "submission_id", s.ID, "user_id", s.UserID, "problem_id", s.ProblemID,
 			"stuck_since", s.CreatedAt)
-		// Through the fanout, so SSE streams on every replica (and Catalog) hear about it, exactly as if the
-		// judge had sent the verdict. If the broker is down, at least this replica's streams are told; the others
-		// pick it up from the database when their clients reconnect.
+		// Through the exchange, so SSE streams on every replica hear about it, exactly as if the judge had sent
+		// the verdict. The routing key keeps it from Catalog: this is the judge's failure, not a scored attempt.
+		// If the broker is down, at least this replica's streams are told; the others pick it up from the
+		// database when their clients reconnect.
 		body, _ := json.Marshal(ev)
-		err := r.pub.Publish(ctx, r.opts.Exchange, "", amqp.Publishing{
+		err := r.pub.Publish(ctx, r.opts.Exchange, r.opts.RoutingKey, amqp.Publishing{
 			ContentType: "application/json", MessageId: s.ID.String(), Timestamp: now, Body: body,
 		})
 		if err != nil {

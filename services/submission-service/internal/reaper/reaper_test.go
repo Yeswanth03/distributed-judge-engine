@@ -51,7 +51,7 @@ func reaped() model.Submission {
 
 func newReaper(store *fakeStore, pub *fakePub, hub *fakeHub) *Reaper {
 	r := New(store, pub, hub, Options{Interval: time.Second, QueuedTimeout: 30 * time.Minute,
-		RunningTimeout: 5 * time.Minute, Exchange: "verdict.fanout"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		RunningTimeout: 5 * time.Minute, Exchange: "verdicts"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r.now = func() time.Time { return time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC) }
 	return r
 }
@@ -67,7 +67,7 @@ func TestReapAnnouncesThroughFanout(t *testing.T) {
 		store.runningBefore != time.Date(2026, 10, 25, 11, 55, 0, 0, time.UTC) || store.message != Message {
 		t.Fatalf("cutoffs %v / %v, message %q", store.queuedBefore, store.runningBefore, store.message)
 	}
-	if len(pub.msgs) != 1 || pub.exch[0] != "verdict.fanout" || pub.msgs[0].MessageId != s.ID.String() {
+	if len(pub.msgs) != 1 || pub.exch[0] != "verdicts" || pub.msgs[0].MessageId != s.ID.String() {
 		t.Fatalf("published %+v to %v", pub.msgs, pub.exch)
 	}
 	var ev model.StatusEvent
