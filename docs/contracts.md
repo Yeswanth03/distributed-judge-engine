@@ -44,14 +44,14 @@ Queue `jobs.queue`. Published by the Submission Service outbox relay.
 {
   "submission_id": "dc7626b3-f4e7-4194-a625-300911712913",
   "user_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  "problem_id": "two-sum",
+  "problem_id": "11111111-1111-1111-1111-111111111111",
   "language": "python",
   "code": "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]",
   "submitted_at": "2026-10-25T11:00:00Z"
 }
 ```
 
-- `problem_id` is the Catalog **slug**.
+- `problem_id` is the Catalog problem **UUID** (the `id` from Catalog's problem responses), here and in every message and API below.
 - `language` is currently only `python`.
 - `code` is at most 64 KB.
 
@@ -69,7 +69,7 @@ The worker publishes **two** events per job.
 {
   "submission_id": "dc7626b3-f4e7-4194-a625-300911712913",
   "user_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-  "problem_id": "two-sum",
+  "problem_id": "11111111-1111-1111-1111-111111111111",
   "status": "RUNNING"
 }
 ```
@@ -92,8 +92,6 @@ The worker publishes **two** events per job.
   "judged_at": "2026-10-25T11:00:02Z"
 }
 ```
-
-- `problem_id` is the Catalog **UUID** in this event, which is what Catalog's leaderboard needs. The worker looks it up with `GET /problems/{slug}`. The Submission Service identifies submissions by `submission_id` and doesn't read this field.
 
 - `status` is one of `RUNNING` or `COMPLETED`.
 - `verdict` is one of:
@@ -124,7 +122,7 @@ All routes go through the gateway, which sets `X-User-Id`.
 ### `POST /api/v1/submissions` → `202 Accepted`
 Request:
 ```json
-{ "problem_id": "two-sum", "language": "python", "code": "..." }
+{ "problem_id": "11111111-1111-1111-1111-111111111111", "language": "python", "code": "..." }
 ```
 Response (also `Location: /api/v1/submissions/{id}`):
 ```json
@@ -136,7 +134,7 @@ Errors (same codes as Catalog):
 - `400 bad_request`: malformed JSON
 - `401 unauthorized`: missing or invalid `X-User-Id`
 - `413 payload_too_large`: code over 64 KB
-- `422 validation_failed`: `problem_id` is not a slug (Catalog's rule: `^[a-z0-9]+(-[a-z0-9]+)*$`, at most 80 characters), unknown `language`, or empty `code`. The message lists every problem.
+- `422 validation_failed`: `problem_id` is not a UUID, unknown `language`, or empty `code`. The message lists every problem.
 
 Visibility: users see only their own submissions; `X-User-Role: admin` sees all. Someone else's submission answers `404`, not `403`, so IDs cannot be probed.
 
@@ -145,7 +143,7 @@ Visibility: users see only their own submissions; `X-User-Role: admin` sees all.
 {
   "submission_id": "dc7626b3-...",
   "user_id": "aaaaaaaa-...",
-  "problem_id": "two-sum",
+  "problem_id": "11111111-1111-1111-1111-111111111111",
   "language": "python",
   "status": "COMPLETED",
   "verdict": "ACCEPTED",
@@ -161,7 +159,7 @@ Visibility: users see only their own submissions; `X-User-Role: admin` sees all.
 - Add `?include=code` to also get `code`.
 - Returns `404 not_found` if the submission doesn't exist.
 
-### `GET /api/v1/submissions?problem_id=two-sum&limit=20&cursor=...` → `200 OK`
+### `GET /api/v1/submissions?problem_id=11111111-1111-1111-1111-111111111111&limit=20&cursor=...` → `200 OK`
 The caller's own submissions, newest first, in the same shape as above:
 ```json
 { "items": [ ... ], "next_cursor": "..." }
@@ -191,4 +189,4 @@ Frontend: use `EventSource`, and call `close()` after the `verdict` event. Other
 
 ## 5. Judge Worker → Catalog
 
-The worker turns the job's slug into the problem's UUID with the public `GET /problems/{slug}`, then fetches hidden test cases from Catalog's `/internal/...` endpoint with `X-Service-Token` (owned by the Catalog team, see their Swagger at `/swagger-ui.html`). Published test sets are immutable, so the worker can cache them by `(problem, testset_version)`.
+The worker fetches hidden test cases from Catalog's `/internal/...` endpoint with `X-Service-Token` (owned by the Catalog team, see their Swagger at `/swagger-ui.html`). Published test sets are immutable, so the worker can cache them by `(problem, testset_version)`.

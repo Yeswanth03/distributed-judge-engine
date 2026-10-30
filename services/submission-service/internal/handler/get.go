@@ -55,10 +55,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	f := repository.ListFilter{UserID: caller.UserID, ProblemID: q.Get("problem_id"), Limit: defaultListLimit}
-	if f.ProblemID != "" && !validSlug(f.ProblemID) {
-		WriteError(w, http.StatusBadRequest, "bad_request", "invalid value for problem_id")
-		return
+	f := repository.ListFilter{UserID: caller.UserID, Limit: defaultListLimit}
+	if v := q.Get("problem_id"); v != "" {
+		id, ok := parseProblemID(v)
+		if !ok {
+			WriteError(w, http.StatusBadRequest, "bad_request", "invalid value for problem_id")
+			return
+		}
+		f.ProblemID = id
 	}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)

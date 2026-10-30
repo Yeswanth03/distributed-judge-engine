@@ -29,7 +29,7 @@ ch.queue_bind(exchange="verdicts", queue=listen_queue, routing_key="verdict.#")
 
 job = {
     "submission_id": str(uuid.uuid4()),
-    "problem_id": "two-sum",
+    "problem_id": "11111111-1111-1111-1111-111111111111",
     "user_id": str(uuid.uuid4()),
     "language": "python",
     "code": "a, b = map(int, input().split())\nprint(a + b)",

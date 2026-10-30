@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -14,13 +13,14 @@ import (
 	"github.com/Yeswanth03/distributed-judge-engine/services/submission-service/internal/model"
 )
 
-// Same rule as Catalog's problem slugs.
-var slugPattern = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
-
-const maxSlugLength = 80
-
-func validSlug(s string) bool {
-	return len(s) <= maxSlugLength && slugPattern.MatchString(s)
+// parseProblemID returns a Catalog problem ID in canonical form, so filtering by it matches however it was
+// written. uuid.Parse also accepts forms like urn:uuid:... that Catalog never sends; the length check rejects them.
+func parseProblemID(s string) (string, bool) {
+	id, err := uuid.Parse(s)
+	if err != nil || len(s) != 36 {
+		return "", false
+	}
+	return id.String(), true
 }
 
 type submitRequest struct {
@@ -59,8 +59,9 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var problems []string
-	if !validSlug(req.ProblemID) {
-		problems = append(problems, "problem_id must be a problem slug like two-sum")
+	problemID, ok := parseProblemID(req.ProblemID)
+	if !ok {
+		problems = append(problems, "problem_id must be the problem's UUID")
 	}
 	if !h.languages[req.Language] {
 		problems = append(problems, fmt.Sprintf("language must be one of: %s", strings.Join(h.opts.AllowedLanguages, ", ")))
@@ -82,7 +83,7 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	s := &model.Submission{
 		ID:        uuid.New(),
 		UserID:    caller.UserID,
-		ProblemID: req.ProblemID,
+		ProblemID: problemID,
 		Language:  req.Language,
 		Code:      req.Code,
 		CreatedAt: h.now().UTC().Truncate(time.Microsecond),
