@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
-from .docker_runner import create_container, is_alive, wipe_and_health_check
+from .docker_runner import cleanup_orphans, create_container, is_alive, wipe_and_health_check
 
 logger = logging.getLogger("spawner.pool")
 
@@ -34,6 +34,7 @@ class PoolEntry:
 
 class Pool:
     def __init__(self, client, settings, container_factory=None):
+        self._client = client
         self._settings = settings
         self._lock = threading.Lock()
         self._entries: dict[str, PoolEntry] = {}
@@ -47,6 +48,16 @@ class Pool:
         )
 
     def start(self):
+        # A restart (crash, Docker pausing/restarting, a redeploy) loses all
+        # in-memory tracking of whatever the previous process instance
+        # created. Without this, those containers become permanently
+        # invisible orphans: never reused, never reaped by the retention
+        # timer, running forever until someone removes them by hand. This was
+        # a real bug, found by noticing containers far older than the
+        # retention window still running. Skipped when a fake client is
+        # injected for testing.
+        if self._client is not None:
+            cleanup_orphans(self._client)
         self._ensure_floor()
         threading.Thread(target=self._reaper_loop, daemon=True).start()
         threading.Thread(target=self._floor_supervisor_loop, daemon=True).start()
