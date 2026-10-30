@@ -1,0 +1,12 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: judge-engine-rabbitmq
+    ports:
+      - "5672:5672" # AMQP, what pika/the services connect to
+      - "15672:15672" # management UI: http://localhost:15672 (guest/guest)
+    healthcheck:
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
