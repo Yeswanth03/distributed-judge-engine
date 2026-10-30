@@ -9,10 +9,16 @@ import (
 const (
 	JobsQueue          = "jobs.queue"
 	JobsDLQ            = "jobs.dlq"
-	VerdictExchange    = "verdict.fanout"
+	VerdictExchange    = "verdicts"
 	DeadLetterExchange = "dead-letter"
 	VerdictQueue       = "submission-service.verdict.queue"
 	VerdictDLQ         = "submission-service.verdict.dlq"
+
+	// VerdictBindingKey receives everything on the exchange: real verdicts and status events alike.
+	VerdictBindingKey = "#"
+	// StatusRoutingKey is for events Catalog must not receive (it binds verdict.# and dead-letters anything
+	// that isn't a complete verdict): reaper give-ups and the fake worker's made-up results.
+	StatusRoutingKey = "status.update"
 )
 
 func quorum(deliveryLimit int64, dlq string) amqp.Table {
@@ -32,7 +38,7 @@ func quorum(deliveryLimit int64, dlq string) amqp.Table {
 func DeclareTopology(ch *amqp.Channel) error {
 	for _, ex := range []struct{ name, kind string }{
 		{DeadLetterExchange, amqp.ExchangeDirect},
-		{VerdictExchange, amqp.ExchangeFanout},
+		{VerdictExchange, amqp.ExchangeTopic},
 	} {
 		if err := ch.ExchangeDeclare(ex.name, ex.kind, true, false, false, false, nil); err != nil {
 			return err
@@ -54,7 +60,7 @@ func DeclareTopology(ch *amqp.Channel) error {
 	for _, b := range []struct{ queue, key, exchange string }{
 		{JobsDLQ, JobsDLQ, DeadLetterExchange},
 		{VerdictDLQ, VerdictDLQ, DeadLetterExchange},
-		{VerdictQueue, "", VerdictExchange},
+		{VerdictQueue, VerdictBindingKey, VerdictExchange},
 	} {
 		if err := ch.QueueBind(b.queue, b.key, b.exchange, false, nil); err != nil {
 			return err

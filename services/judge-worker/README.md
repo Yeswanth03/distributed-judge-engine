@@ -31,10 +31,14 @@ Catalog/Spawner clients, no broker, no Docker, no network needed.
 
 | Var | Default | Meaning |
 |---|---|---|
-| `JUDGE_RABBITMQ_URL` | `amqp://guest:guest@localhost:5672/` | broker connection |
+| `JUDGE_RABBITMQ_URL` | `amqp://judge:judge@localhost:5672/` | broker connection |
 | `JUDGE_CATALOG_BASE_URL` | `http://localhost:8080` | Catalog service |
 | `JUDGE_SPAWNER_BASE_URL` | `http://localhost:8081` | Spawner service |
 | `JUDGE_INTERNAL_SERVICE_TOKEN` | `local-dev-token` | must match Catalog's `catalog.internal-token` |
+| `JUDGE_HEALTH_PORT` | `8083` | health and metrics endpoints |
+
+Queue names, the exchange and the message formats are in
+[docs/contracts.md](../../docs/contracts.md).
 
 ## Why there's no time/memory limit on the Job message
 

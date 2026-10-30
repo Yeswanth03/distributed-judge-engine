@@ -1,4 +1,4 @@
-// Package consumer reads the status events the Judge Worker publishes to verdict.fanout.
+// Package consumer reads the status events the Judge Worker publishes to the verdicts exchange.
 //
 // Two consumers share the exchange:
 //   - DBConsumer reads the durable, shared queue: across all replicas each event is applied to the database
@@ -33,7 +33,7 @@ var verdictEvents = promauto.NewCounterVec(prometheus.CounterOpts{
 	Help: "Status events consumed into the database, by status and result (applied, duplicate, invalid).",
 }, []string{"status", "result"})
 
-// ParseEvent decodes and validates a status event from verdict.fanout.
+// ParseEvent decodes and validates a status event from the verdicts exchange.
 func ParseEvent(body []byte) (model.StatusEvent, error) {
 	var ev model.StatusEvent
 	if err := json.Unmarshal(body, &ev); err != nil {
@@ -171,7 +171,7 @@ func (c *DBConsumer) apply(ctx context.Context, ev model.StatusEvent) (bool, err
 	return c.Store.UpdateVerdictIdempotent(ctx, ev)
 }
 
-// SSEConsumer feeds this replica's SSE hub from a private queue bound to verdict.fanout.
+// SSEConsumer feeds this replica's SSE hub from a private queue bound to the verdicts exchange.
 type SSEConsumer struct {
 	Conn     *broker.Conn
 	Hub      *sse.Hub
@@ -206,7 +206,7 @@ func (c *SSEConsumer) session(ctx context.Context, conn *amqp.Connection) error 
 	if err != nil {
 		return err
 	}
-	if err := ch.QueueBind(q.Name, "", c.Exchange, false, nil); err != nil {
+	if err := ch.QueueBind(q.Name, broker.VerdictBindingKey, c.Exchange, false, nil); err != nil {
 		return err
 	}
 	deliveries, err := ch.Consume(q.Name, "", true, true, false, false, nil)

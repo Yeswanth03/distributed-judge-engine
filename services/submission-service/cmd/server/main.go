@@ -98,6 +98,7 @@ func run(cfg config.Config, log *slog.Logger) error {
 		QueuedTimeout:  cfg.ReaperQueuedTimeout,
 		RunningTimeout: cfg.ReaperRunningTimeout,
 		Exchange:       broker.VerdictExchange,
+		RoutingKey:     broker.StatusRoutingKey,
 	}, log.With("component", "reaper"))
 	for _, run := range []func(context.Context){relay.Run, dbConsumer.Run, sseConsumer.Run, stuck.Run} {
 		workDone.Go(func() { run(workCtx) })
