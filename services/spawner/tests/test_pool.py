@@ -3,6 +3,7 @@ real Docker daemon. These exercise the behaviors from the design doc directly:
 floor-on-start, atomic claim, reuse-vs-destroy, retention reaping, and the max cap.
 """
 
+import threading
 import time
 
 import pytest
@@ -46,6 +47,45 @@ def pool(monkeypatch):
     yield p
     p.stop()
     time.sleep(0.1)  # let the background loops see _stop before monkeypatch reverts
+
+
+def test_start_cleans_up_orphaned_containers_from_a_previous_instance(monkeypatch):
+    """Regression test for a real bug: a restarted Spawner process has no
+    memory of what a previous instance created, so those containers became
+    permanently invisible orphans, never reused, never reaped by the
+    retention timer. Found by noticing containers older than the retention
+    window still running on the host. Confirms start() removes anything
+    matching our naming prefix before creating a fresh floor."""
+    removed = []
+
+    class FakeOrphan:
+        def remove(self, force=True):
+            removed.append(True)
+
+    class FakeContainersAPI:
+        def list(self, all=True, filters=None):
+            assert filters == {"name": "spawner-sandbox-"}
+            return [FakeOrphan(), FakeOrphan()]
+
+    class FakeClient:
+        containers = FakeContainersAPI()
+
+    counter = {"n": 0}
+
+    def factory():
+        counter["n"] += 1
+        return FakeContainer(f"c{counter['n']}")
+
+    monkeypatch.setattr("app.pool.is_alive", lambda c: not c.removed)
+    monkeypatch.setattr("app.pool.wipe_and_health_check", lambda c: not c.removed)
+
+    p = Pool(client=FakeClient(), settings=FakeSettings(), container_factory=factory)
+    p.start()
+    time.sleep(0.05)
+    p.stop()
+    time.sleep(0.1)
+
+    assert len(removed) == 2  # both orphans from the "previous instance" were cleaned up
 
 
 def test_floor_container_spawned_on_start(pool):
@@ -93,28 +133,45 @@ def test_floor_supervisor_survives_a_transient_spawn_failure(monkeypatch, pool):
     container creation fail transiently, and the supervisor loop had no
     try/except, so it died permanently and the floor never came back even
     after Docker recovered. This confirms one failed attempt doesn't kill the
-    loop, and it does recover on a later tick."""
+    loop, and it does recover on a later tick.
+
+    Polls instead of sleeping for a fixed duration: a fixed sleep has to
+    guess how many ticks land inside it, and with a 0.05s tick interval a
+    0.1s sleep is right on the boundary, sometimes one tick fits, sometimes
+    two, which made this test genuinely flaky, not just slow."""
     first_floor = next(iter(pool._entries.values())).container
     first_floor.removed = True  # floor dies, as if the host crashed it
 
     real_factory = pool._container_factory
     attempts = {"n": 0}
+    allow_success = threading.Event()
 
     def flaky_factory():
         attempts["n"] += 1
         if attempts["n"] == 1:
             raise RuntimeError("docker daemon unreachable (simulated)")
+        allow_success.wait(timeout=2)  # don't succeed until the test says to
         return real_factory()
 
     monkeypatch.setattr(pool, "_container_factory", flaky_factory)
 
-    time.sleep(0.1)  # supervisor tick 1: tries to respawn, fails, must not crash the loop
-    assert pool.stats()["floor_healthy"] is False
+    _wait_until(lambda: attempts["n"] >= 1)
+    # The first (failing) attempt must not have crashed the supervisor loop,
+    # and must not have left a stale floor behind.
+    _wait_until(lambda: pool.stats()["floor_healthy"] is False)
 
-    time.sleep(0.1)  # supervisor tick 2: should succeed now that the factory recovered
-    stats = pool.stats()
-    assert stats["total"] == 1
-    assert stats["floor_healthy"] is True
+    allow_success.set()  # now let the next attempt succeed
+    _wait_until(lambda: pool.stats()["floor_healthy"] is True)
+    assert pool.stats()["total"] == 1
+
+
+def _wait_until(condition, timeout=2.0, interval=0.01):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if condition():
+            return
+        time.sleep(interval)
+    raise AssertionError(f"condition not met within {timeout}s")
 
 
 def test_floor_respawns_if_it_dies(pool):

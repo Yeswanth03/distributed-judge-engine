@@ -11,6 +11,7 @@ from docker.errors import APIError, NotFound
 from .models import ExecuteRequest, ExecuteResult
 
 WORKDIR = "/workspace/run"
+NAME_PREFIX = "spawner-sandbox-"
 
 # Language -> command used to run a submission inside the sandbox, relative to WORKDIR.
 # Only Python is wired up for this project; add an entry here before accepting another language.
@@ -44,7 +45,7 @@ def create_container(client, image: str, memory_mb: int, cpus: float):
         # Otherwise Docker assigns a random name (quizzical_borg, etc.), making
         # it impossible to tell our sandboxes apart from anything else running
         # on the host at a glance (e.g. in Docker Desktop's container list).
-        name=f"spawner-sandbox-{uuid.uuid4().hex[:8]}",
+        name=f"{NAME_PREFIX}{uuid.uuid4().hex[:8]}",
         network_disabled=True,
         read_only=True,
         tmpfs={"/workspace": "rw,size=64m,exec"},
@@ -58,6 +59,22 @@ def create_container(client, image: str, memory_mb: int, cpus: float):
     )
     container.exec_run(["mkdir", "-p", WORKDIR])
     return container
+
+
+def cleanup_orphans(client):
+    """Removes any spawner-sandbox-* container left over from a previous process
+    instance. The pool's tracking is purely in-memory, so a restart (a crash, a
+    deploy, Docker itself pausing/restarting) loses track of whatever the last
+    instance created; those containers keep running, untracked, until something
+    removes them. This is a real bug that was found by noticing containers
+    older than the retention window still running: call this once, before the
+    first _ensure_floor(), so every startup begins from a genuinely clean
+    state instead of silently accumulating orphans forever."""
+    for container in client.containers.list(all=True, filters={"name": NAME_PREFIX}):
+        try:
+            container.remove(force=True)
+        except Exception:
+            pass
 
 
 def is_alive(container) -> bool:
