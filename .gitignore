@@ -1,2 +1,11 @@
 ### IntelliJ IDEA ###
 .idea/
+
+### Python (services/spawner, services/judge-worker) ###
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+### macOS ###
+.DS_Store
