@@ -160,7 +160,7 @@ func expectError(t *testing.T, rec *httptest.ResponseRecorder, status int, code 
 	}
 }
 
-const validBody = `{"problem_id":"two-sum","language":"python","code":"print(1)"}`
+const validBody = `{"problem_id":"11111111-1111-1111-1111-111111111111","language":"python","code":"print(1)"}`
 
 func TestSubmitAccepted(t *testing.T) {
 	ts := newTestServer(t)
@@ -190,7 +190,7 @@ func TestSubmitAccepted(t *testing.T) {
 	if err := json.Unmarshal(ts.store.events[0].Payload, &job); err != nil {
 		t.Fatal(err)
 	}
-	want := model.JobMessage{SubmissionID: resp.SubmissionID, UserID: alice, ProblemID: "two-sum",
+	want := model.JobMessage{SubmissionID: resp.SubmissionID, UserID: alice, ProblemID: "11111111-1111-1111-1111-111111111111",
 		Language: "python", Code: "print(1)", SubmittedAt: resp.CreatedAt}
 	if job != want {
 		t.Fatalf("job payload\n got %+v\nwant %+v", job, want)
@@ -199,7 +199,7 @@ func TestSubmitAccepted(t *testing.T) {
 
 func TestSubmitIgnoresUserIDInBody(t *testing.T) {
 	ts := newTestServer(t)
-	body := `{"user_id":"` + bob.String() + `","problem_id":"two-sum","language":"python","code":"x"}`
+	body := `{"user_id":"` + bob.String() + `","problem_id":"11111111-1111-1111-1111-111111111111","language":"python","code":"x"}`
 	resp := decode[submitResponse](t, ts.do(t, "POST", "/api/v1/submissions", &alice, body))
 	if got := ts.store.subs[resp.SubmissionID].UserID; got != alice {
 		t.Fatalf("user = %s, want the X-User-Id caller", got)
@@ -218,11 +218,12 @@ func TestSubmitRejections(t *testing.T) {
 	}{
 		{"no user", nil, validBody, 401, "unauthorized"},
 		{"malformed json", &alice, `{"problem_id":`, 400, "bad_request"},
-		{"bad slug", &alice, `{"problem_id":"Two Sum","language":"python","code":"x"}`, 422, "validation_failed"},
-		{"slug too long", &alice, `{"problem_id":"` + strings.Repeat("a", 81) + `","language":"python","code":"x"}`, 422, "validation_failed"},
-		{"unknown language", &alice, `{"problem_id":"two-sum","language":"cobol","code":"x"}`, 422, "validation_failed"},
-		{"blank code", &alice, `{"problem_id":"two-sum","language":"python","code":"  \n"}`, 422, "validation_failed"},
-		{"code over limit", &alice, `{"problem_id":"two-sum","language":"python","code":"` + long + `"}`, 413, "payload_too_large"},
+		{"not a uuid", &alice, `{"problem_id":"Two Sum","language":"python","code":"x"}`, 422, "validation_failed"},
+		{"slug instead of uuid", &alice, `{"problem_id":"two-sum","language":"python","code":"x"}`, 422, "validation_failed"},
+		{"uuid in another form", &alice, `{"problem_id":"urn:uuid:11111111-1111-1111-1111-111111111111","language":"python","code":"x"}`, 422, "validation_failed"},
+		{"unknown language", &alice, `{"problem_id":"11111111-1111-1111-1111-111111111111","language":"cobol","code":"x"}`, 422, "validation_failed"},
+		{"blank code", &alice, `{"problem_id":"11111111-1111-1111-1111-111111111111","language":"python","code":"  \n"}`, 422, "validation_failed"},
+		{"code over limit", &alice, `{"problem_id":"11111111-1111-1111-1111-111111111111","language":"python","code":"` + long + `"}`, 413, "payload_too_large"},
 		{"body far over limit", &alice, `{"code":"` + strings.Repeat("x", 100_000) + `"}`, 413, "payload_too_large"},
 	}
 	for _, c := range cases {
@@ -250,9 +251,18 @@ func submitAs(t *testing.T, ts *testServer, user uuid.UUID, problem string) uuid
 	return decode[submitResponse](t, ts.do(t, "POST", "/api/v1/submissions", &user, body)).SubmissionID
 }
 
+func TestProblemIDIsStoredInCanonicalForm(t *testing.T) {
+	ts := newTestServer(t)
+	id := submitAs(t, ts, alice, "AAAAAAAA-1111-1111-1111-111111111111")
+	raw := decode[map[string]any](t, ts.do(t, "GET", "/api/v1/submissions/"+id.String(), &alice, ""))
+	if raw["problem_id"] != "aaaaaaaa-1111-1111-1111-111111111111" {
+		t.Fatalf("problem_id %v", raw["problem_id"])
+	}
+}
+
 func TestGetSubmission(t *testing.T) {
 	ts := newTestServer(t)
-	id := submitAs(t, ts, alice, "two-sum")
+	id := submitAs(t, ts, alice, "11111111-1111-1111-1111-111111111111")
 	path := "/api/v1/submissions/" + id.String()
 
 	rec := ts.do(t, "GET", path, &alice, "")
@@ -260,7 +270,7 @@ func TestGetSubmission(t *testing.T) {
 		t.Fatalf("status %d", rec.Code)
 	}
 	raw := decode[map[string]any](t, rec)
-	if raw["status"] != "QUEUED" || raw["verdict"] != nil || raw["problem_id"] != "two-sum" {
+	if raw["status"] != "QUEUED" || raw["verdict"] != nil || raw["problem_id"] != "11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("unexpected body %v", raw)
 	}
 	if _, has := raw["code"]; has {
@@ -295,13 +305,13 @@ func TestListSubmissionsPagination(t *testing.T) {
 
 	var want []string // newest first
 	for i := range 5 {
-		problem := "two-sum"
+		problem := "11111111-1111-1111-1111-111111111111"
 		if i == 2 {
-			problem = "add-two-numbers"
+			problem = "22222222-2222-2222-2222-222222222222"
 		}
 		want = append([]string{submitAs(t, ts, alice, problem).String()}, want...)
 	}
-	submitAs(t, ts, bob, "two-sum")
+	submitAs(t, ts, bob, "11111111-1111-1111-1111-111111111111")
 
 	type page struct {
 		Items []struct {
@@ -332,7 +342,7 @@ func TestListSubmissionsPagination(t *testing.T) {
 		t.Fatalf("got  %v\nwant %v", got, want)
 	}
 
-	one := decode[page](t, ts.do(t, "GET", "/api/v1/submissions?problem_id=add-two-numbers", &alice, ""))
+	one := decode[page](t, ts.do(t, "GET", "/api/v1/submissions?problem_id=22222222-2222-2222-2222-222222222222", &alice, ""))
 	if len(one.Items) != 1 || one.NextCursor != nil {
 		t.Fatalf("problem filter: %+v", one)
 	}
@@ -347,6 +357,7 @@ func TestListSubmissionsPagination(t *testing.T) {
 	expectError(t, ts.do(t, "GET", "/api/v1/submissions?cursor=!!!", &alice, ""), 400, "bad_request")
 	expectError(t, ts.do(t, "GET", "/api/v1/submissions?cursor=bm9waXBl", &alice, ""), 400, "bad_request") // "nopipe"
 	expectError(t, ts.do(t, "GET", "/api/v1/submissions?problem_id=NOPE", &alice, ""), 400, "bad_request")
+	expectError(t, ts.do(t, "GET", "/api/v1/submissions?problem_id=two-sum", &alice, ""), 400, "bad_request")
 }
 
 func TestCursorRoundTrip(t *testing.T) {

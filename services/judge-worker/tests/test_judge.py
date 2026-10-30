@@ -11,10 +11,6 @@ PROBLEM_UUID = "11111111-1111-1111-1111-111111111111"
 
 
 class FakeCatalog:
-    def get_problem_id(self, slug):
-        assert slug == "two-sum"
-        return PROBLEM_UUID
-
     def get_testset(self, problem_id):
         assert problem_id == PROBLEM_UUID
         return {
@@ -44,7 +40,7 @@ class FakeSpawner:
 def _job():
     return Job(
         submission_id="sub-1",
-        problem_id="two-sum",
+        problem_id=PROBLEM_UUID,
         user_id="user-1",
         language="python",
         code="print(5)",
@@ -123,7 +119,7 @@ def test_job_matches_the_contract_message():
         {
             "submission_id": "dc7626b3-f4e7-4194-a625-300911712913",
             "user_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-            "problem_id": "two-sum",
+            "problem_id": "11111111-1111-1111-1111-111111111111",
             "language": "python",
             "code": "print(5)",
             "submitted_at": "2026-10-25T11:00:00Z",

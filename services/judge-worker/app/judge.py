@@ -6,8 +6,7 @@ from .spawner_client import SpawnerClient
 
 
 def judge_submission(job: Job, catalog: CatalogClient, spawner: SpawnerClient, worker_id: str) -> Verdict:
-    problem_id = catalog.get_problem_id(job.problem_id)
-    testset = catalog.get_testset(problem_id)
+    testset = catalog.get_testset(job.problem_id)
 
     results: list[TestResult] = []
     verdict = "ACCEPTED"
@@ -49,7 +48,7 @@ def judge_submission(job: Job, catalog: CatalogClient, spawner: SpawnerClient, w
     return Verdict(
         submission_id=job.submission_id,
         user_id=job.user_id,
-        problem_id=problem_id,
+        problem_id=job.problem_id,
         testset_version=testset["version"],
         verdict=verdict,
         rejudge_seq=0,  # always 0 until re-judging a submission is built

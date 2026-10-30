@@ -42,7 +42,7 @@ func newSSEFixture(t *testing.T, heartbeat time.Duration) *sseFixture {
 }
 
 func (f *sseFixture) submission(user uuid.UUID, mutate ...func(*model.Submission)) uuid.UUID {
-	s := &model.Submission{ID: uuid.New(), UserID: user, ProblemID: "two-sum", Language: "python", Code: "x",
+	s := &model.Submission{ID: uuid.New(), UserID: user, ProblemID: "11111111-1111-1111-1111-111111111111", Language: "python", Code: "x",
 		CreatedAt: time.Now()}
 	f.store.CreateSubmissionWithOutbox(context.Background(), s, &model.OutboxEvent{}) //nolint:errcheck
 	for _, m := range mutate {

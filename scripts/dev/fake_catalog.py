@@ -25,11 +25,6 @@ TESTSET = {
 }
 
 
-@app.get("/problems/{slug}")
-def problem(slug: str):
-    return {"id": TESTSET["problem_id"], "slug": slug}
-
-
 @app.get("/internal/problems/{problem_id}/testset")
 def testset(problem_id: str, x_service_token: str = Header(None)):
     if x_service_token != "local-dev-token":

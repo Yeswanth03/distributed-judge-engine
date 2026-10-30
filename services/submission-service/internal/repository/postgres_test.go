@@ -99,7 +99,7 @@ func TestMigrateTwiceIsNoOp(t *testing.T) {
 func TestCreateSubmissionWithOutbox(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
-	s := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
+	s := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now())
 
 	got, err := repo.GetSubmissionByID(ctx, s.ID)
 	if err != nil {
@@ -118,7 +118,7 @@ func TestCreateSubmissionWithOutbox(t *testing.T) {
 		Scan(&status, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if status != "PENDING" || payload.SubmissionID != s.ID || payload.ProblemID != "two-sum" {
+	if status != "PENDING" || payload.SubmissionID != s.ID || payload.ProblemID != "11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("unexpected outbox row: status=%s payload=%+v", status, payload)
 	}
 }
@@ -126,7 +126,7 @@ func TestCreateSubmissionWithOutbox(t *testing.T) {
 func TestCreateSubmissionWithOutboxIsAtomic(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
-	s := &model.Submission{ID: uuid.New(), UserID: uuid.New(), ProblemID: "two-sum", Language: "python",
+	s := &model.Submission{ID: uuid.New(), UserID: uuid.New(), ProblemID: "11111111-1111-1111-1111-111111111111", Language: "python",
 		Code: "x", CreatedAt: time.Now()}
 	// Invalid JSON makes the second INSERT fail after the first succeeded.
 	ev := &model.OutboxEvent{AggregateID: s.ID, EventType: model.EventSubmissionCreated, Payload: []byte("{not json")}
@@ -154,7 +154,7 @@ func TestGetSubmissionNotFound(t *testing.T) {
 func TestStatusOnlyMovesForward(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	ctx := context.Background()
-	s := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
+	s := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now())
 
 	mustBool := func(want bool, got bool, err error, what string) {
 		t.Helper()
@@ -190,7 +190,7 @@ func TestStatusOnlyMovesForward(t *testing.T) {
 func TestVerdictWithoutRunning(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	ctx := context.Background()
-	s := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
+	s := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now())
 
 	ok, err := repo.UpdateVerdictIdempotent(ctx, verdictEvent(s.ID, model.VerdictTimeLimitExceeded, 2000))
 	if err != nil || !ok {
@@ -200,7 +200,7 @@ func TestVerdictWithoutRunning(t *testing.T) {
 
 func TestVerdictRequiresValidVerdict(t *testing.T) {
 	repo, _ := newTestRepo(t)
-	s := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
+	s := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now())
 	ev := verdictEvent(s.ID, "NOPE", 1)
 	if _, err := repo.UpdateVerdictIdempotent(context.Background(), ev); err == nil {
 		t.Fatal("expected an error for an unknown verdict")
@@ -210,7 +210,7 @@ func TestVerdictRequiresValidVerdict(t *testing.T) {
 func TestConcurrentDuplicateVerdictsApplyOnce(t *testing.T) {
 	repo, _ := newTestRepo(t)
 	ctx := context.Background()
-	s := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
+	s := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now())
 
 	var applied atomic.Int32
 	var wg sync.WaitGroup
@@ -240,14 +240,14 @@ func TestListSubmissionsPaginates(t *testing.T) {
 	base := time.Now().Add(-time.Hour)
 	var want []uuid.UUID // newest first
 	for i := range 5 {
-		problem := "two-sum"
+		problem := "11111111-1111-1111-1111-111111111111"
 		if i%2 == 1 {
-			problem = "add-two-numbers"
+			problem = "22222222-2222-2222-2222-222222222222"
 		}
 		s := createSubmission(t, repo, user, problem, base.Add(time.Duration(i)*time.Minute))
 		want = append([]uuid.UUID{s.ID}, want...)
 	}
-	createSubmission(t, repo, other, "two-sum", base)
+	createSubmission(t, repo, other, "11111111-1111-1111-1111-111111111111", base)
 
 	var got []uuid.UUID
 	var after *Cursor
@@ -272,7 +272,7 @@ func TestListSubmissionsPaginates(t *testing.T) {
 		t.Fatalf("got %v\nwant %v", got, want)
 	}
 
-	page, err := repo.ListSubmissions(ctx, ListFilter{UserID: user, ProblemID: "add-two-numbers", Limit: 10})
+	page, err := repo.ListSubmissions(ctx, ListFilter{UserID: user, ProblemID: "22222222-2222-2222-2222-222222222222", Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,8 +294,8 @@ func TestProcessOutboxBatchPublishesOldestFirst(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
 	base := time.Now().Add(-time.Minute)
-	a := createSubmission(t, repo, uuid.New(), "two-sum", base)
-	b := createSubmission(t, repo, uuid.New(), "two-sum", base.Add(time.Second))
+	a := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", base)
+	b := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", base.Add(time.Second))
 
 	var order []uuid.UUID
 	res, err := repo.ProcessOutboxBatch(ctx, 10, 5, func(_ context.Context, ev model.OutboxEvent) error {
@@ -329,8 +329,8 @@ func TestProcessOutboxBatchStopsAtFirstFailure(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
 	base := time.Now().Add(-time.Minute)
-	a := createSubmission(t, repo, uuid.New(), "two-sum", base)
-	b := createSubmission(t, repo, uuid.New(), "two-sum", base.Add(time.Second))
+	a := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", base)
+	b := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", base.Add(time.Second))
 
 	brokerDown := errors.New("broker down")
 	calls := 0
@@ -359,7 +359,7 @@ func TestConcurrentRelaysNeverPublishTwice(t *testing.T) {
 	ctx := context.Background()
 	const n = 30
 	for i := range n {
-		createSubmission(t, repo, uuid.New(), "two-sum", time.Now().Add(time.Duration(i)*time.Millisecond))
+		createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now().Add(time.Duration(i)*time.Millisecond))
 	}
 
 	var mu sync.Mutex
@@ -403,10 +403,10 @@ func TestReapStuck(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
 	user := uuid.New()
-	oldQueued := createSubmission(t, repo, user, "two-sum", time.Now())
-	oldRunning := createSubmission(t, repo, user, "two-sum", time.Now())
-	freshRunning := createSubmission(t, repo, user, "two-sum", time.Now())
-	done := createSubmission(t, repo, user, "two-sum", time.Now())
+	oldQueued := createSubmission(t, repo, user, "11111111-1111-1111-1111-111111111111", time.Now())
+	oldRunning := createSubmission(t, repo, user, "11111111-1111-1111-1111-111111111111", time.Now())
+	freshRunning := createSubmission(t, repo, user, "11111111-1111-1111-1111-111111111111", time.Now())
+	done := createSubmission(t, repo, user, "11111111-1111-1111-1111-111111111111", time.Now())
 
 	repo.MarkRunning(ctx, oldRunning.ID)                                                               //nolint:errcheck
 	repo.MarkRunning(ctx, freshRunning.ID)                                                             //nolint:errcheck
@@ -440,8 +440,8 @@ func TestReapStuck(t *testing.T) {
 func TestDeletePublishedBefore(t *testing.T) {
 	repo, pool := newTestRepo(t)
 	ctx := context.Background()
-	a := createSubmission(t, repo, uuid.New(), "two-sum", time.Now())
-	createSubmission(t, repo, uuid.New(), "two-sum", time.Now()) // stays PENDING
+	a := createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now())
+	createSubmission(t, repo, uuid.New(), "11111111-1111-1111-1111-111111111111", time.Now()) // stays PENDING
 
 	repo.ProcessOutboxBatch(ctx, 1, 5, func(context.Context, model.OutboxEvent) error { return nil })                 //nolint:errcheck
 	pool.Exec(ctx, `UPDATE outbox_events SET published_at = NOW() - INTERVAL '2 days' WHERE aggregate_id = $1`, a.ID) //nolint:errcheck

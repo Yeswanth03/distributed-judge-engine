@@ -45,7 +45,7 @@ func (h *fakeHub) Publish(ev model.StatusEvent) { h.events = append(h.events, ev
 func reaped() model.Submission {
 	v := model.VerdictInternalError
 	msg := Message
-	return model.Submission{ID: uuid.New(), UserID: uuid.New(), ProblemID: "two-sum",
+	return model.Submission{ID: uuid.New(), UserID: uuid.New(), ProblemID: "11111111-1111-1111-1111-111111111111",
 		Status: model.StatusCompleted, Verdict: &v, ErrorMessage: &msg}
 }
 

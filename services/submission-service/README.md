@@ -49,7 +49,7 @@ Locally there is no gateway, so send the user ID yourself:
 ```bash
 U=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
 curl -X POST localhost:8082/api/v1/submissions -H "X-User-Id: $U" \
-     -d '{"problem_id":"two-sum","language":"python","code":"return wrong"}'
+     -d '{"problem_id":"11111111-1111-1111-1111-111111111111","language":"python","code":"return wrong"}'
 curl -N localhost:8082/api/v1/submissions/<submission_id>/events -H "X-User-Id: $U"
 ```
 

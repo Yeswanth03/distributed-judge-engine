@@ -4,8 +4,7 @@ from pydantic import BaseModel
 class Job(BaseModel):
     """What Submission Service puts on the queue. Note there's no time/memory limit
     here: those are fixed per-problem on Catalog and fetched from there, not carried
-    on the job (see Catalog's /internal/problems/{id}/testset). problem_id here is
-    the Catalog slug, see docs/contracts.md."""
+    on the job (see Catalog's /internal/problems/{id}/testset)."""
 
     submission_id: str
     problem_id: str
@@ -38,9 +37,8 @@ class Verdict(BaseModel):
     testset_version, verdict, rejudge_seq, judged_at) match Catalog's real
     VerdictMessageParser exactly, not a guess: extra fields below are fine,
     Catalog ignores anything it doesn't read, but the required ones and their
-    exact names are a hard contract. problem_id is Catalog's UUID here, not the
-    job's slug. rejudge_seq is 0 until re-judging submissions is built; Catalog
-    uses it to ignore stale/duplicate verdicts."""
+    exact names are a hard contract. rejudge_seq is 0 until re-judging
+    submissions is built; Catalog uses it to ignore stale/duplicate verdicts."""
 
     submission_id: str
     user_id: str
