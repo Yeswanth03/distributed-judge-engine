@@ -3,3 +3,12 @@
 
 # Local overrides for docker compose (ports etc.)
 .env
+
+### Python (services/spawner, services/judge-worker) ###
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+### macOS ###
+.DS_Store

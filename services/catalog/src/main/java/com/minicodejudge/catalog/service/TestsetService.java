@@ -1,11 +1,15 @@
 package com.minicodejudge.catalog.service;
 
+import com.minicodejudge.catalog.dto.AdminDtos.TestsetVersion;
+import com.minicodejudge.catalog.dto.InternalDtos.InternalTestset;
 import com.minicodejudge.catalog.dto.TestsetDtos.CaseRequest;
 import com.minicodejudge.catalog.dto.TestsetDtos.TestsetCreated;
 import com.minicodejudge.catalog.dto.TestsetDtos.TestsetRequest;
 import com.minicodejudge.catalog.repository.ProblemRepository;
+import com.minicodejudge.catalog.repository.ProblemRepository.JudgeLimits;
 import com.minicodejudge.catalog.repository.ProblemRepository.LockedFields;
 import com.minicodejudge.catalog.repository.TestsetRepository;
+import com.minicodejudge.catalog.repository.TestsetRepository.TestsetInfo;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -13,6 +17,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -67,6 +72,34 @@ public class TestsetService {
         }
         testsets.markPublished(problemId, version);
         problems.markPublished(problemId, version);
+    }
+
+    /** Every version of a problem's test set, newest first, drafts included, marking the current one. */
+    public List<TestsetVersion> listVersions(UUID problemId) {
+        JudgeLimits problem = problems.findJudgeLimits(problemId)
+                .orElseThrow(() -> new NotFoundException("problem not found"));
+        return testsets.listVersions(problemId, problem.currentVersion());
+    }
+
+    /**
+     * Every case of one published version plus the limits, for a judge worker. Without a version, the problem's
+     * current one is used. Drafts are never served: the judge only runs data that can no longer change.
+     * No transaction is needed: the version resolved here is published, so its cases are immutable.
+     */
+    public InternalTestset forJudge(UUID problemId, @Nullable Integer requestedVersion) {
+        JudgeLimits problem = problems.findJudgeLimits(problemId)
+                .orElseThrow(() -> new NotFoundException("problem not found"));
+        Integer version = requestedVersion != null ? requestedVersion : problem.currentVersion();
+        if (version == null) {
+            throw new NotFoundException("problem has no published test set");
+        }
+        TestsetInfo info = testsets.findInfo(problemId, version)
+                .orElseThrow(() -> new NotFoundException("test set version " + version + " not found"));
+        if (!"published".equals(info.status())) {
+            throw new NotFoundException("test set version " + version + " is not published");
+        }
+        return new InternalTestset(problemId, version, info.contentHash(), problem.timeLimitMs(),
+                problem.memoryLimitMb(), testsets.findAllCases(problemId, version));
     }
 
     /**

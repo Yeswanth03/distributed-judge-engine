@@ -1,5 +1,7 @@
 package com.minicodejudge.catalog.controller;
 
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemPage;
+import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemView;
 import com.minicodejudge.catalog.dto.ApiError;
 import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
 import com.minicodejudge.catalog.dto.ProblemDtos.ProblemCreated;
@@ -13,26 +15,70 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Pattern;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Admin writes for problems. The admin role check lives in AuthInterceptor. */
+/** Admin reads and writes for problems, drafts included. The admin role check lives in AuthInterceptor. */
 @RestController
 @RequestMapping("/admin/problems")
-@Tag(name = "Admin: problems", description = "Create and edit problems. Needs X-User-Role: admin.")
+@Tag(name = "Admin: problems", description = "List, view, create and edit problems, drafts included. Needs X-User-Role: admin.")
 public class AdminProblemController {
 
     private final ProblemService service;
 
     public AdminProblemController(ProblemService service) {
         this.service = service;
+    }
+
+    @GetMapping
+    @Operation(summary = "List all problems",
+            description = "Drafts included, with status and current version, sorted by slug. Pass next_cursor as "
+                    + "cursor for the next page.")
+    @ApiResponse(responseCode = "200", description = "One page of problems")
+    @ApiResponse(responseCode = "400", description = "Invalid status or limit", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"bad_request\",\"message\":\"status must be draft or published\"}")))
+    @ApiResponse(responseCode = "403", description = "Missing admin role", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"forbidden\",\"message\":\"admin role required\"}")))
+    public AdminProblemPage list(
+            @Parameter(description = "Only problems with this status", schema = @Schema(allowableValues = {"draft", "published"}))
+            @RequestParam(name = "status", required = false)
+            @Pattern(regexp = "draft|published", message = "must be draft or published") @Nullable String status,
+            @Parameter(description = "Page size, 1 to 100")
+            @RequestParam(name = "limit", defaultValue = "50") @Min(1) @Max(100) int limit,
+            @Parameter(description = "next_cursor from the previous page; omit for the first page")
+            @RequestParam(name = "cursor", required = false) @Nullable String cursor) {
+        return service.listForAdmin(status, limit, cursor);
+    }
+
+    @GetMapping("/{id}")
+    @Operation(summary = "Get any problem", description = "Every field, including status and the current version, for drafts too.")
+    @ApiResponse(responseCode = "200", description = "The problem")
+    @ApiResponse(responseCode = "400", description = "id is not a UUID", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"bad_request\",\"message\":\"invalid value for id\"}")))
+    @ApiResponse(responseCode = "403", description = "Missing admin role", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"forbidden\",\"message\":\"admin role required\"}")))
+    @ApiResponse(responseCode = "404", description = "No problem with this id", content = @Content(
+            schema = @Schema(implementation = ApiError.class),
+            examples = @ExampleObject(value = "{\"error\":\"not_found\",\"message\":\"problem not found\"}")))
+    public AdminProblemView get(@Parameter(description = "Problem id returned by create") @PathVariable("id") UUID id) {
+        return service.getForAdmin(id);
     }
 
     @PostMapping

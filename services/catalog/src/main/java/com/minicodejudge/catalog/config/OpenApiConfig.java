@@ -12,13 +12,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * The OpenAPI document behind Swagger UI. The admin role is declared as a header "security scheme", so Swagger's
- * Authorize button can set X-User-Role (normally added by the gateway) on every request.
+ * The OpenAPI document behind Swagger UI. The admin role and the service token are declared as header "security
+ * schemes", so Swagger's Authorize button can set X-User-Role (normally added by the gateway) and X-Service-Token.
  */
 @Configuration
 public class OpenApiConfig {
 
-    private static final String ADMIN_ROLE = "adminRole";
+    /** Default for every endpoint; public and internal controllers override it. */
+    public static final String ADMIN_ROLE = "adminRole";
+    public static final String SERVICE_TOKEN = "serviceToken";
 
     @Bean
     OpenAPI catalogOpenApi() {
@@ -29,14 +31,22 @@ public class OpenApiConfig {
                         .description("""
                                 Problems and versioned test sets. All JSON fields are snake_case.
 
-                                Click **Authorize** and enter `admin` (the gateway normally sets X-User-Role).
+                                Click **Authorize**: enter `admin` for the admin endpoints (the gateway normally sets
+                                X-User-Role), and the service token for the internal one (INTERNAL_SERVICE_TOKEN;
+                                `local-dev-token` with the local profile).
                                 Typical flow: create a problem → upload a test set → publish that version.
                                 """))
-                .components(new Components().addSecuritySchemes(ADMIN_ROLE, new SecurityScheme()
-                        .type(SecurityScheme.Type.APIKEY)
-                        .in(SecurityScheme.In.HEADER)
-                        .name("X-User-Role")
-                        .description("Enter: admin")))
+                .components(new Components()
+                        .addSecuritySchemes(ADMIN_ROLE, new SecurityScheme()
+                                .type(SecurityScheme.Type.APIKEY)
+                                .in(SecurityScheme.In.HEADER)
+                                .name("X-User-Role")
+                                .description("Enter: admin"))
+                        .addSecuritySchemes(SERVICE_TOKEN, new SecurityScheme()
+                                .type(SecurityScheme.Type.APIKEY)
+                                .in(SecurityScheme.In.HEADER)
+                                .name("X-Service-Token")
+                                .description("Shared secret of judge workers (INTERNAL_SERVICE_TOKEN)")))
                 .addSecurityItem(new SecurityRequirement().addList(ADMIN_ROLE));
     }
 
