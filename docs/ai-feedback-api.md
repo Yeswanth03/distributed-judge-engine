@@ -1,37 +1,34 @@
 # AI Feedback API
 
-## Fetch submitted code (internal Submission Service)
-
-```http
-GET /internal/submissions/{submission_id}/source
-X-Service-Token: <SERVICE_TOKEN>
-```
-
-Returns `submission_id`, `user_id`, `problem_id`, `language`, and `source_code`.
-
-## Automatic feedback for failed verdicts (RabbitMQ)
-
-The AI Service consumes `verdict.wrong_answer`, `verdict.time_limit_exceeded`,
-`verdict.memory_limit_exceeded`, `verdict.runtime_error`, and
-`verdict.compile_error`. It fetches the source using `submission_id` and
-generates feedback. It does not consume `verdict.accepted` automatically.
-
-## Request feedback (AI Service)
+## Request feedback
 
 ```http
 POST /submissions/{submission_id}/feedback
-Authorization: Bearer <USER_TOKEN>
+X-User-ID: user-42
+Idempotency-Key: feedback-attempt-1
 ```
 
-Use for on-demand feedback, including accepted submissions. Returns `202`
-with a `request_id` and `status: queued`.
+No body is required. Generates and stores feedback, then returns the request and
+result. Generation is synchronous in this version. Requires `X-User-ID` and an
+`Idempotency-Key`. Returns `503` with an `unavailable` request record if Ollama
+fails.
 
-## Get feedback (AI Service)
+## Get a feedback request
 
 ```http
 GET /feedback-requests/{request_id}
-Authorization: Bearer <USER_TOKEN>
+X-User-ID: user-42
 ```
 
-Returns `status` (`queued`, `processing`, `ready`, or `unavailable`) and the
-feedback when ready.
+Returns the request status and saved feedback, if ready.
+
+## Get the latest feedback for a submission
+
+```http
+GET /submissions/{submission_id}/feedback
+X-User-ID: user-42
+```
+
+All routes require the trusted user identity set by the gateway. Swagger UI is
+served at `/docs`. Submission and problem details are mocked in this increment.
+Feedback is stored in the AI service's PostgreSQL database.

@@ -1,33 +1,9 @@
-import logging
-
-from .broker import consume_forever
-from .mock_submission import MockSubmissionProvider
-from .models import FailedVerdictEvent
-from .ollama_client import OllamaClient
-
-logging.basicConfig(level=logging.INFO)
-
-
-def handle_failed_verdict(
-    event: FailedVerdictEvent,
-    submissions: MockSubmissionProvider,
-    ollama: OllamaClient,
-) -> None:
-    """Fetch mock context and generate feedback before acknowledging the event."""
-    logger = logging.getLogger("ai_service")
-    context = submissions.fetch(event)
-    feedback = ollama.generate_feedback(event, context)
-    logger.info("AI feedback for submission %s: %s", event.submission_id, feedback)
-
-
 def main() -> None:
-    submissions = MockSubmissionProvider()
-    ollama = OllamaClient()
+    import uvicorn
 
-    def process(event: FailedVerdictEvent) -> None:
-        handle_failed_verdict(event, submissions, ollama)
+    from .config import settings
 
-    consume_forever(process)
+    uvicorn.run("app.api:app", host=settings.api_host, port=settings.api_port)
 
 
 if __name__ == "__main__":
