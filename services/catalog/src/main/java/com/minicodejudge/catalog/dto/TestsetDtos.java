@@ -10,8 +10,11 @@ import java.util.List;
 /** Request and response shapes for test sets. JSON field names are snake_case (see application.properties). */
 public final class TestsetDtos {
 
-    /** Per-field cap, so one upload cannot push huge inputs into the judge workers' memory. */
-    public static final int MAX_CASE_FIELD_CHARS = 65_536;
+    /**
+     * Per-field cap, so one upload cannot push huge inputs into the judge workers' memory. 4 MiB fits n = 2·10^5
+     * numbers, the size at which an O(n²) brute force no longer fits a 1 s limit.
+     */
+    public static final int MAX_CASE_FIELD_CHARS = 4 * 1024 * 1024;
 
     private TestsetDtos() {}
 
