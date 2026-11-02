@@ -2,7 +2,7 @@ import httpx
 from dataclasses import dataclass
 
 from .config import settings
-from .mock_submission import SubmissionContext
+from .schemas import SubmissionContext
 
 
 SYSTEM_PROMPT = (

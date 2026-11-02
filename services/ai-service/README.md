@@ -1,9 +1,11 @@
 # AI Feedback Service
 
-Consumes failed verdicts, generates feedback with Ollama, and stores feedback in
-its own PostgreSQL database. The service also exposes an API for requesting
-feedback on demand and retrieving saved results. Submission and problem details
-are currently mocked.
+Consumes failed verdicts, generates requested feedback with Ollama, and stores
+feedback in its own PostgreSQL database. The service exposes an API for requesting
+feedback on demand and retrieving saved results. For local Swagger requests,
+the client supplies the source code and safe problem details in the request
+body. Failed verdict events are recorded as `awaiting_context` until the real
+Submission Service lookup is integrated.
 
 ## Run locally
 
@@ -38,13 +40,29 @@ service must only be reachable through a gateway that strips client-supplied
 POST /submissions/{submission_id}/feedback
 X-User-ID: user-42
 Idempotency-Key: feedback-attempt-1
+Content-Type: application/json
 ```
 
-No body is required. The service creates a request, calls Ollama, saves the
-result, and returns it. Because generation is synchronous in this increment,
-the request waits for Ollama. Reusing the same idempotency key for the same user
-and submission returns the existing request rather than generating another
-result.
+Request body:
+
+```json
+{
+  "verdict": "wrong_answer",
+  "language": "python3.11",
+  "source_code": "def two_sum(nums, target):\n    return []",
+  "problem": {
+    "problem_id": "db2353a5-0000-4000-8000-000000000001",
+    "title": "Two Sum",
+    "statement": "Return the indices of two values that add up to the target.",
+    "constraints": "The input list may contain duplicate values."
+  }
+}
+```
+
+The service creates a request, calls Ollama, saves the result, and returns it.
+Generation is synchronous in this increment, so the request waits for Ollama.
+Reusing the same idempotency key for the same user and submission returns the
+existing result rather than generating another one.
 
 ### Get one feedback request
 
@@ -74,8 +92,9 @@ Failed verdict events use a deterministic key derived from `submission_id` and
 The RabbitMQ consumer binds its own durable queue to `verdict.wrong_answer`,
 `verdict.time_limit_exceeded`, `verdict.memory_limit_exceeded`,
 `verdict.runtime_error`, and `verdict.compile_error`. It acknowledges a valid
-event only after the feedback record is saved. Invalid messages go to
-`ai.feedback.dlq`.
+event only after its request record is saved. Since verdict events do not carry
+the source code, the record stays `awaiting_context` until the internal
+Submission Service lookup is connected. Invalid messages go to `ai.feedback.dlq`.
 
 ## Configuration
 
@@ -96,7 +115,8 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_API_HOST` | `0.0.0.0` | HTTP bind address |
 | `AI_API_PORT` | `8084` | HTTP port |
 
-The mock provider currently returns the same sample problem and code for any
-submission ID. Replace it with authenticated Submission Service and safe Catalog
-lookups before using real submissions. Never send hidden test inputs or expected
-outputs to Ollama. The API trusts `X-User-ID` only behind the trusted gateway.
+The request body is intended for Swagger/local development. In production, the
+frontend should send the submission ID; the AI service should fetch its code
+from the authenticated Submission Service and safe problem details from
+Catalog. Never send hidden test inputs or expected outputs to Ollama. The API
+trusts `X-User-ID` only behind the trusted gateway.
