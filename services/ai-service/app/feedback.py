@@ -2,9 +2,9 @@ import logging
 from uuid import UUID
 
 from .database import FeedbackDatabase, feedback_database
-from .mock_submission import MockSubmissionProvider
 from .models import FailedVerdictEvent
 from .ollama_client import OllamaClient
+from .schemas import SubmissionContext
 
 logger = logging.getLogger("ai_service.feedback")
 
@@ -13,11 +13,9 @@ class FeedbackProcessor:
     def __init__(
         self,
         database: FeedbackDatabase = feedback_database,
-        submissions: MockSubmissionProvider | None = None,
         ollama: OllamaClient | None = None,
     ) -> None:
         self.database = database
-        self.submissions = submissions or MockSubmissionProvider()
         self.ollama = ollama or OllamaClient()
 
     def request_feedback(
@@ -25,13 +23,12 @@ class FeedbackProcessor:
         *,
         submission_id: UUID,
         user_id: str,
-        verdict: str,
-        rejudge_seq: int,
-        trigger: str,
         idempotency_key: str,
-        problem_id: UUID | None = None,
+        context: SubmissionContext,
+        verdict: str,
+        rejudge_seq: int = 0,
+        trigger: str = "user_request",
     ) -> dict:
-        context = self.submissions.fetch(submission_id, user_id, problem_id)
         row = self.database.create_request(
             submission_id=submission_id,
             user_id=user_id,
@@ -59,7 +56,7 @@ class FeedbackProcessor:
 
     def process_failed_verdict(self, event: FailedVerdictEvent) -> None:
         idempotency_key = f"verdict:{event.submission_id}:{event.rejudge_seq}"
-        row = self.request_feedback(
+        row = self.database.create_request(
             submission_id=event.submission_id,
             user_id=event.user_id,
             problem_id=event.problem_id,
@@ -67,12 +64,13 @@ class FeedbackProcessor:
             rejudge_seq=event.rejudge_seq,
             trigger="failed_verdict",
             idempotency_key=idempotency_key,
+            initial_status="awaiting_context",
         )
         logger.info(
-            "feedback status=%s for submission=%s request=%s",
-            row["status"],
+            "failed verdict saved; awaiting source/problem lookup: submission=%s request=%s status=%s",
             event.submission_id,
             row["request_id"],
+            row["status"],
         )
 
 

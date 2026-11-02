@@ -7,7 +7,7 @@ from fastapi import FastAPI, Header, HTTPException, Response, status
 from .broker import consume_forever
 from .database import feedback_database
 from .feedback import feedback_processor
-from .schemas import FeedbackResponse
+from .schemas import FeedbackRequestBody, FeedbackResponse, SubmissionContext
 
 
 @asynccontextmanager
@@ -43,19 +43,31 @@ app = FastAPI(
 )
 def request_feedback(
     submission_id: UUID,
+    body: FeedbackRequestBody,
     response: Response,
     x_user_id: str = Header(..., alias="X-User-ID", min_length=1, max_length=200),
     idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=200),
 ) -> dict:
-    """Generate and store feedback. Local mock accepts any submission ID."""
+    """Generate and store feedback from supplied context (for Swagger/dev use)."""
+    context = SubmissionContext(
+        submission_id=submission_id,
+        user_id=x_user_id,
+        problem_id=body.problem.problem_id,
+        language=body.language,
+        source_code=body.source_code,
+        problem_title=body.problem.title,
+        problem_statement=body.problem.statement,
+        constraints=body.problem.constraints,
+    )
     try:
         row = feedback_processor.request_feedback(
             submission_id=submission_id,
             user_id=x_user_id,
-            verdict="accepted",
+            verdict=body.verdict,
             rejudge_seq=0,
             trigger="user_request",
             idempotency_key=f"user:{submission_id}:{idempotency_key}",
+            context=context,
         )
     except Exception as exc:
         failed = feedback_database.get_request_by_key(

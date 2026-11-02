@@ -12,16 +12,33 @@ class FeedbackDatabase:
         return psycopg.connect(settings.database_url, row_factory=dict_row)
 
     def initialize(self) -> None:
-        migration = (
-            Path(__file__).resolve().parent.parent
-            / "db"
-            / "migration"
-            / "V1__create_feedback_requests.sql"
-        )
+        migration_dir = Path(__file__).resolve().parent.parent / "db" / "migration"
         with self._connect() as connection:
-            for statement in migration.read_text().split(";"):
-                if statement.strip():
-                    connection.execute(statement)
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ai_schema_migrations (
+                    version TEXT PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+
+        for migration in sorted(migration_dir.glob("V*__*.sql")):
+            version = migration.name.split("__", maxsplit=1)[0]
+            with self._connect() as connection:
+                applied = connection.execute(
+                    "SELECT 1 FROM ai_schema_migrations WHERE version = %s",
+                    (version,),
+                ).fetchone()
+                if applied:
+                    continue
+                for statement in migration.read_text().split(";"):
+                    if statement.strip():
+                        connection.execute(statement)
+                connection.execute(
+                    "INSERT INTO ai_schema_migrations (version) VALUES (%s)",
+                    (version,),
+                )
 
     def create_request(
         self,
@@ -33,6 +50,7 @@ class FeedbackDatabase:
         rejudge_seq: int,
         trigger: str,
         idempotency_key: str,
+        initial_status: str = "queued",
     ) -> dict:
         request_id = uuid4()
         with self._connect() as connection:
@@ -42,7 +60,7 @@ class FeedbackDatabase:
                     request_id, submission_id, user_id, problem_id, verdict,
                     rejudge_seq, request_source, idempotency_key, status,
                     model_name, prompt_version, input_tokens, output_tokens
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'queued', %s, %s, NULL, NULL)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL)
                 ON CONFLICT (user_id, idempotency_key) DO NOTHING
                 """,
                 (
@@ -54,6 +72,7 @@ class FeedbackDatabase:
                     rejudge_seq,
                     trigger,
                     idempotency_key,
+                    initial_status,
                     settings.ollama_model,
                     settings.prompt_version,
                 ),

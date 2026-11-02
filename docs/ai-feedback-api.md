@@ -8,10 +8,10 @@ X-User-ID: user-42
 Idempotency-Key: feedback-attempt-1
 ```
 
-No body is required. Generates and stores feedback, then returns the request and
-result. Generation is synchronous in this version. Requires `X-User-ID` and an
-`Idempotency-Key`. Returns `503` with an `unavailable` request record if Ollama
-fails.
+Body includes `verdict`, `language`, `source_code`, and safe `problem` details
+(`problem_id`, `title`, `statement`, `constraints`). Generates and stores
+feedback, then returns the result. Generation is synchronous. Returns `503`
+with an `unavailable` request record if Ollama fails.
 
 ## Get a feedback request
 
@@ -30,5 +30,7 @@ X-User-ID: user-42
 ```
 
 All routes require the trusted user identity set by the gateway. Swagger UI is
-served at `/docs`. Submission and problem details are mocked in this increment.
+served at `/docs`. The body is for Swagger/local development; production should
+fetch source and problem details server-to-server. Failed verdict events are
+stored as `awaiting_context` until the Submission Service lookup is integrated.
 Feedback is stored in the AI service's PostgreSQL database.

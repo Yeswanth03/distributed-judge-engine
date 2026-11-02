@@ -2,7 +2,7 @@
 .idea/
 
 ### Python (services/spawner, services/judge-worker) ###
-.venv/
+.venv*/
 __pycache__/
 *.pyc
 .pytest_cache/
