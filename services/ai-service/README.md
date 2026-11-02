@@ -1,8 +1,11 @@
-# AI Service: failed-verdict consumer
+# AI Service: mock feedback generation
 
-Part 1 of the AI feedback service. It consumes failed verdict events from the
-Judge Worker's RabbitMQ topic exchange and extracts the submission identifier.
-Submission lookup and Ollama integration are later parts.
+The service consumes failed verdict events from the Judge Worker's RabbitMQ
+topic exchange, looks up mock submission/problem data by the event's IDs, and
+asks Ollama to generate short feedback. The mock provider returns the same
+example Two Sum submission for any event; replace it with Submission Service
+and Catalog clients in a later part. Feedback is currently logged and is not
+yet persisted or returned through a user-facing API.
 
 ## RabbitMQ contract
 
@@ -48,7 +51,11 @@ The consumer uses `AI_`-prefixed environment variables:
 | `AI_DEAD_LETTER_EXCHANGE` | `verdicts.dlx` | Direct exchange for invalid messages |
 | `AI_DEAD_LETTER_QUEUE` | `ai.feedback.dlq` | Queue for invalid messages |
 | `AI_RECONNECT_MAX_SECONDS` | `30` | Maximum reconnect delay |
+| `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `AI_OLLAMA_MODEL` | `llama3.2` | Local model name; it must already be available in Ollama |
+| `AI_OLLAMA_TIMEOUT_SECONDS` | `120` | HTTP timeout for a generation request |
 
-At this stage the handler logs the IDs from valid failed-verdict events. It does
-not yet fetch source/problem details, call Ollama, or save feedback. Do not treat
-this part as the completed AI feedback pipeline.
+The mock handler logs the generated feedback. It does not yet persist feedback
+or expose it through a user-facing API. Since the message is acknowledged after
+generation/logging, a crash before acknowledgement may cause Ollama to generate
+the same response again; durable idempotency is a later reliability part.
