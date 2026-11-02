@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2"
     ollama_timeout_seconds: float = 120.0
+    prompt_version: str = "1"
+    database_url: str = "postgresql://postgres:postgres@localhost:5432/ai_feedback"
+    api_host: str = "0.0.0.0"
+    api_port: int = 8084
 
 
 settings = Settings()

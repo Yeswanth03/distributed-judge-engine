@@ -1,38 +1,20 @@
-# AI Service: mock feedback generation
+# AI Feedback Service
 
-The service consumes failed verdict events from the Judge Worker's RabbitMQ
-topic exchange, looks up mock submission/problem data by the event's IDs, and
-asks Ollama to generate short feedback. The mock provider returns the same
-example Two Sum submission for any event; replace it with Submission Service
-and Catalog clients in a later part. Feedback is currently logged and is not
-yet persisted or returned through a user-facing API.
-
-## RabbitMQ contract
-
-The Judge Worker publishes persistent messages to the durable `verdicts` topic
-exchange using `verdict.<status>` routing keys. This service declares its own
-durable `ai.feedback.jobs` queue and binds only:
-
-- `verdict.wrong_answer`
-- `verdict.time_limit_exceeded`
-- `verdict.memory_limit_exceeded`
-- `verdict.runtime_error`
-- `verdict.compile_error`
-
-Accepted verdicts are not consumed. The event is validated against the Judge
-Worker's fields: `submission_id`, `user_id`, `problem_id`, `testset_version`,
-`verdict`, `rejudge_seq`, and `judged_at`. Extra verdict fields are ignored.
-
-Malformed or mismatched events are dead-lettered to `ai.feedback.dlq`. Valid
-events are manually acknowledged after the handler completes. RabbitMQ can
-redeliver if the consumer fails before acknowledgement, so later handlers that
-call services or store results must be idempotent. Transient processing errors
-are currently requeued; bounded retry/dead-letter policy for repeated transient
-failures is a follow-up reliability part.
+Consumes failed verdicts, generates feedback with Ollama, and stores feedback in
+its own PostgreSQL database. The service also exposes an API for requesting
+feedback on demand and retrieving saved results. Submission and problem details
+are currently mocked.
 
 ## Run locally
 
-Start RabbitMQ from the repository root, then:
+From the repository root, start PostgreSQL and RabbitMQ:
+
+```bash
+docker compose up -d postgres rabbitmq
+```
+
+Start Ollama separately and make sure the configured model is available (the
+default is `llama3.2`). Then run the AI service:
 
 ```bash
 cd services/ai-service
@@ -41,21 +23,80 @@ python3 -m venv .venv
 .venv/bin/python -m app.main
 ```
 
-The consumer uses `AI_`-prefixed environment variables:
+Swagger UI is at <http://localhost:8084/docs>.
+
+## API
+
+The gateway must authenticate the user and pass a trusted `X-User-ID` header.
+For local Swagger use, enter a sample user ID directly. In deployment, the AI
+service must only be reachable through a gateway that strips client-supplied
+`X-User-ID` headers and sets its own.
+
+### Request feedback
+
+```http
+POST /submissions/{submission_id}/feedback
+X-User-ID: user-42
+Idempotency-Key: feedback-attempt-1
+```
+
+No body is required. The service creates a request, calls Ollama, saves the
+result, and returns it. Because generation is synchronous in this increment,
+the request waits for Ollama. Reusing the same idempotency key for the same user
+and submission returns the existing request rather than generating another
+result.
+
+### Get one feedback request
+
+```http
+GET /feedback-requests/{request_id}
+X-User-ID: user-42
+```
+
+### Get latest feedback for a submission
+
+```http
+GET /submissions/{submission_id}/feedback
+X-User-ID: user-42
+```
+
+Feedback responses include `request_id`, `submission_id`, `problem_id`,
+`verdict`, `rejudge_seq`, `status`, `feedback`, model and prompt versions,
+token counts, and timestamps.
+
+## Storage and message handling
+
+`feedback_requests` stores the request status and generated feedback. Its unique
+`(user_id, idempotency_key)` constraint makes retries of the same request safe.
+Failed verdict events use a deterministic key derived from `submission_id` and
+`rejudge_seq`; on-demand requests use the caller's `Idempotency-Key`.
+
+The RabbitMQ consumer binds its own durable queue to `verdict.wrong_answer`,
+`verdict.time_limit_exceeded`, `verdict.memory_limit_exceeded`,
+`verdict.runtime_error`, and `verdict.compile_error`. It acknowledges a valid
+event only after the feedback record is saved. Invalid messages go to
+`ai.feedback.dlq`.
+
+## Configuration
+
+All settings use the `AI_` environment-variable prefix.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `AI_RABBITMQ_URL` | `amqp://guest:guest@localhost:5672/` | Broker connection |
+| `AI_RABBITMQ_URL` | `amqp://guest:guest@localhost:5672/` | RabbitMQ connection |
 | `AI_VERDICTS_EXCHANGE` | `verdicts` | Judge Worker topic exchange |
 | `AI_FEEDBACK_QUEUE` | `ai.feedback.jobs` | AI-owned durable queue |
-| `AI_DEAD_LETTER_EXCHANGE` | `verdicts.dlx` | Direct exchange for invalid messages |
-| `AI_DEAD_LETTER_QUEUE` | `ai.feedback.dlq` | Queue for invalid messages |
-| `AI_RECONNECT_MAX_SECONDS` | `30` | Maximum reconnect delay |
-| `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `AI_OLLAMA_MODEL` | `llama3.2` | Local model name; it must already be available in Ollama |
-| `AI_OLLAMA_TIMEOUT_SECONDS` | `120` | HTTP timeout for a generation request |
+| `AI_DEAD_LETTER_EXCHANGE` | `verdicts.dlx` | Dead-letter exchange |
+| `AI_DEAD_LETTER_QUEUE` | `ai.feedback.dlq` | Invalid-message queue |
+| `AI_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/ai_feedback` | AI database |
+| `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
+| `AI_OLLAMA_MODEL` | `llama3.2` | Installed local model name |
+| `AI_OLLAMA_TIMEOUT_SECONDS` | `120` | Ollama request timeout |
+| `AI_PROMPT_VERSION` | `1` | Prompt version stored with each response |
+| `AI_API_HOST` | `0.0.0.0` | HTTP bind address |
+| `AI_API_PORT` | `8084` | HTTP port |
 
-The mock handler logs the generated feedback. It does not yet persist feedback
-or expose it through a user-facing API. Since the message is acknowledged after
-generation/logging, a crash before acknowledgement may cause Ollama to generate
-the same response again; durable idempotency is a later reliability part.
+The mock provider currently returns the same sample problem and code for any
+submission ID. Replace it with authenticated Submission Service and safe Catalog
+lookups before using real submissions. Never send hidden test inputs or expected
+outputs to Ollama. The API trusts `X-User-ID` only behind the trusted gateway.
