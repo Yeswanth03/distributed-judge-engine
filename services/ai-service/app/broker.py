@@ -74,8 +74,7 @@ def _on_message(process_event: Callable[[FailedVerdictEvent], None]):
             return
 
         try:
-            # Ack only after the handler completes. The handler can be extended
-            # with source retrieval and LLM generation in the next project part.
+            # Ack only after mock context retrieval and LLM generation complete.
             process_event(event)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         except Exception:

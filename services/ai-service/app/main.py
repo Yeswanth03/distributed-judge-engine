@@ -1,29 +1,33 @@
 import logging
 
 from .broker import consume_forever
+from .mock_submission import MockSubmissionProvider
 from .models import FailedVerdictEvent
+from .ollama_client import OllamaClient
 
 logging.basicConfig(level=logging.INFO)
 
 
-def handle_failed_verdict(event: FailedVerdictEvent) -> None:
-    """Part 1 handler: verify delivery and expose the submission identifier.
-
-    Later parts will fetch submission/problem data, call Ollama, and persist the
-    result before this handler returns (and therefore before the broker ack).
-    """
+def handle_failed_verdict(
+    event: FailedVerdictEvent,
+    submissions: MockSubmissionProvider,
+    ollama: OllamaClient,
+) -> None:
+    """Fetch mock context and generate feedback before acknowledging the event."""
     logger = logging.getLogger("ai_service")
-    logger.info(
-        "received failed verdict: submission_id=%s problem_id=%s verdict=%s rejudge_seq=%s",
-        event.submission_id,
-        event.problem_id,
-        event.verdict.value,
-        event.rejudge_seq,
-    )
+    context = submissions.fetch(event)
+    feedback = ollama.generate_feedback(event, context)
+    logger.info("AI feedback for submission %s: %s", event.submission_id, feedback)
 
 
 def main() -> None:
-    consume_forever(handle_failed_verdict)
+    submissions = MockSubmissionProvider()
+    ollama = OllamaClient()
+
+    def process(event: FailedVerdictEvent) -> None:
+        handle_failed_verdict(event, submissions, ollama)
+
+    consume_forever(process)
 
 
 if __name__ == "__main__":
