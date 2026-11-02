@@ -15,10 +15,13 @@ NAME_PREFIX = "spawner-sandbox-"
 
 # Language -> command used to run a submission inside the sandbox, relative to WORKDIR.
 # Only Python is wired up for this project; add an entry here before accepting another language.
+# "python" is the name jobs use (docs/contracts.md).
 RUN_COMMANDS = {
+    "python": "python3 solution.py",
     "python3.11": "python3 solution.py",
 }
 SOURCE_FILENAMES = {
+    "python": "solution.py",
     "python3.11": "solution.py",
 }
 

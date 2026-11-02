@@ -1,6 +1,9 @@
 ### IntelliJ IDEA ###
 .idea/
 
+# Local overrides for docker compose (ports etc.)
+.env
+
 ### Python (services/spawner, services/judge-worker) ###
 .venv/
 __pycache__/

@@ -1,12 +1,73 @@
+# Local development stack. Services join as they are built.
+#   docker compose up -d
+#   RabbitMQ UI: http://localhost:15672 (judge / judge)
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      # Set POSTGRES_PORT in .env if something else on your machine already uses 5432.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   rabbitmq:
-    image: rabbitmq:3.13-management
+    image: rabbitmq:4.1-management
     container_name: judge-engine-rabbitmq
     ports:
-      - "5672:5672" # AMQP, what pika/the services connect to
-      - "15672:15672" # management UI: http://localhost:15672 (guest/guest)
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./deploy/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./deploy/rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     healthcheck:
-      test: ["CMD", "rabbitmqctl", "status"]
-      interval: 5s
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
       timeout: 5s
       retries: 10
+
+  submission-service:
+    build: ./services/submission-service
+    environment:
+      DATABASE_URL: postgres://submission:submission@postgres:5432/submission?sslmode=disable
+      AMQP_URL: amqp://judge:judge@rabbitmq:5672/
+      # Lets a frontend dev server on another port call the API directly (no gateway locally).
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+    ports:
+      # 8082 on the host: Catalog uses 8080 when run from the IDE.
+      - "${SUBMISSION_PORT:-8082}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/server", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Stand-in for the Judge Worker: `docker compose --profile fake-worker up -d`.
+  # Picks verdicts from the code (see services/submission-service/cmd/fakeworker). Leave it off once the
+  # real worker runs, or the two will compete for jobs.
+  fake-worker:
+    build: ./services/submission-service
+    entrypoint: ["/fakeworker"]
+    environment:
+      AMQP_URL: amqp://judge:judge@rabbitmq:5672/
+      FAKE_JUDGE_MS: ${FAKE_JUDGE_MS:-1500}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    profiles: ["fake-worker"]
+
+volumes:
+  postgres-data:

@@ -10,8 +10,17 @@ class Job(BaseModel):
     problem_id: str
     user_id: str
     language: str
-    source_code: str
+    code: str
     submitted_at: str
+
+
+class RunningEvent(BaseModel):
+    """Published when the worker starts a job, routing key `status.running`."""
+
+    submission_id: str
+    user_id: str
+    problem_id: str
+    status: str = "RUNNING"
 
 
 class TestResult(BaseModel):
@@ -22,7 +31,8 @@ class TestResult(BaseModel):
 
 
 class Verdict(BaseModel):
-    """Published to the 'verdicts' topic exchange, routing key `verdict.<verdict>`.
+    """Published to the 'verdicts' topic exchange, routing key `verdict.<verdict>`
+    (lowercase). The status and result fields are what the Submission Service reads.
     Field names and the required subset (submission_id, user_id, problem_id,
     testset_version, verdict, rejudge_seq, judged_at) match Catalog's real
     VerdictMessageParser exactly, not a guess: extra fields below are fine,
@@ -34,13 +44,17 @@ class Verdict(BaseModel):
     user_id: str
     problem_id: str
     testset_version: int
-    verdict: str  # lowercase, e.g. "accepted", "wrong_answer" (see judge.py's _classify)
+    status: str = "COMPLETED"
+    verdict: str  # e.g. "ACCEPTED", "WRONG_ANSWER" (see judge.py's _classify)
     rejudge_seq: int = 0
     judged_at: str
+    execution_time_ms: int
+    memory_kb: int | None
+    test_cases_passed: int
+    total_test_cases: int
+    error_message: str | None = None
 
     # Not read by Catalog's listener, kept for our own observability/debugging.
     test_results: list[TestResult]
-    total_time_ms: int
-    max_memory_kb: int | None
     content_hash: str
     worker_id: str
