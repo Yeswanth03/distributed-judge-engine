@@ -1,5 +1,6 @@
 package com.minicodejudge.catalog.dto;
 
+import com.minicodejudge.catalog.dto.ProblemDtos.FunctionParameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +36,11 @@ public final class AdminDtos {
             @Schema(example = "100") int points,
             @Schema(example = "1000") int timeLimitMs,
             @Schema(example = "256") int memoryLimitMb,
+            @Schema(description = "null only for a problem created before function details existed", example = "twoSum")
+            @Nullable String functionName,
+            @Nullable List<FunctionParameter> parameters,
+            @Schema(example = "int[]") @Nullable String returnType,
+            @Nullable String starterCode,
             @Schema(allowableValues = {"draft", "published"}, example = "draft") String status,
             @Schema(description = "Published test set version; null until the first publish") @Nullable Integer currentVersion,
             Instant createdAt,

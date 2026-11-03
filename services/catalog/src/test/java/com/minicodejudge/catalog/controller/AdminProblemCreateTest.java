@@ -3,11 +3,13 @@ package com.minicodejudge.catalog.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +40,12 @@ class AdminProblemCreateTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
+    private static final String STARTER = """
+            class Solution:
+                def twoSum(self, nums: list[int], target: int) -> list[int]:
+                    pass
+            """;
+
     @Autowired
     MockMvc mvc;
 
@@ -64,6 +72,51 @@ class AdminProblemCreateTest {
                 .containsEntry("time_limit_ms", 1000)
                 .containsEntry("memory_limit_mb", 256)
                 .containsEntry("status", "draft");
+
+        mvc.perform(get("/admin/problems/" + id).header("X-User-Role", "admin"))
+                .andExpect(jsonPath("$.function_name").value("twoSum"))
+                .andExpect(jsonPath("$.parameters[1].name").value("target"))
+                .andExpect(jsonPath("$.parameters[1].type").value("int"))
+                .andExpect(jsonPath("$.return_type").value("int[]"))
+                .andExpect(jsonPath("$.starter_code").value(STARTER));
+    }
+
+    @Test
+    void functionDetailsAreRequiredAndChecked() throws Exception {
+        Map<String, Object> missing = validBody();
+        missing.remove("function_name");
+        missing.remove("parameters");
+        create(missing, "admin")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value(
+                        allOf(containsString("function_name"), containsString("parameters"))));
+
+        Map<String, Object> badType = validBody();
+        badType.put("return_type", "list<int>");
+        create(badType, "admin")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value(containsString("return_type")));
+
+        Map<String, Object> repeated = validBody();
+        repeated.put("parameters", List.of(
+                Map.of("name", "nums", "type", "int[]"), Map.of("name", "nums", "type", "int")));
+        create(repeated, "admin")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value("parameters must not repeat the name 'nums'"));
+
+        Map<String, Object> reserved = validBody();
+        reserved.put("parameters", List.of(Map.of("name", "self", "type", "int")));
+        create(reserved, "admin")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value("parameters must not use the reserved word 'self'"));
+
+        Map<String, Object> wrongStarter = validBody();
+        wrongStarter.put("starter_code", "class Solution:\n    def other(self):\n        pass\n");
+        create(wrongStarter, "admin")
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value("starter_code must define twoSum"));
+
+        assertThat(rowCount()).isZero();
     }
 
     @Test
@@ -158,6 +211,11 @@ class AdminProblemCreateTest {
         body.put("points", 100);
         body.put("time_limit_ms", 1000);
         body.put("memory_limit_mb", 256);
+        body.put("function_name", "twoSum");
+        body.put("parameters", List.of(
+                Map.of("name", "nums", "type", "int[]"), Map.of("name", "target", "type", "int")));
+        body.put("return_type", "int[]");
+        body.put("starter_code", STARTER);
         return body;
     }
 

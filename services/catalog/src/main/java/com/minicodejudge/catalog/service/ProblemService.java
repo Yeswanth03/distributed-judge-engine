@@ -34,6 +34,7 @@ public class ProblemService {
 
     /** New problems start as drafts (the column default); the UUID is the id other services use. */
     public UUID createProblem(CreateProblemRequest request) {
+        FunctionRules.checkDetails(request.functionDetails());
         UUID id = UUID.randomUUID();
         try {
             repo.insert(id, request);
@@ -45,20 +46,23 @@ public class ProblemService {
     }
 
     /**
-     * Replaces the editable fields. Once a problem is published, difficulty, points and limits are locked because
-     * verdicts and scores already depend on them; resending the same values is fine, changing them is a conflict.
+     * Replaces the editable fields. Once a problem is published, difficulty, points, limits and function details are
+     * locked because verdicts, scores and test cases already depend on them; resending the same values is fine,
+     * changing them is a conflict. A published problem that has no function details yet may still be given them.
      */
     @Transactional
     public void updateProblem(UUID id, UpdateProblemRequest request) {
+        FunctionRules.checkDetails(request.functionDetails());
         LockedFields current = repo.lockById(id).orElseThrow(() -> new NotFoundException("problem not found"));
 
         boolean lockedFieldChanged = !request.difficulty().equals(current.difficulty())
                 || request.points() != current.points()
                 || request.timeLimitMs() != current.timeLimitMs()
-                || request.memoryLimitMb() != current.memoryLimitMb();
+                || request.memoryLimitMb() != current.memoryLimitMb()
+                || (current.function() != null && !request.functionDetails().equals(current.function()));
         if ("published".equals(current.status()) && lockedFieldChanged) {
             throw new ConflictException(
-                    "difficulty, points and limits are locked once a problem is published; only title and statement can change");
+                    "difficulty, points, limits and function details are locked once a problem is published; only title and statement can change");
         }
         repo.update(id, request);
     }
@@ -75,7 +79,7 @@ public class ProblemService {
                 .orElseThrow(() -> new NotFoundException("problem not found"));
         List<Sample> samples = testsets.findSamples(p.id(), p.currentVersion());
         return new ProblemView(p.id(), p.slug(), p.title(), p.statementMd(), p.difficulty(), p.points(),
-                p.timeLimitMs(), p.memoryLimitMb(), samples);
+                p.timeLimitMs(), p.memoryLimitMb(), p.starterCode(), samples);
     }
 
     /** One page of published problems in slug order. Fetches one extra row to know whether another page exists. */
