@@ -1,32 +1,45 @@
+import logging
 from contextlib import asynccontextmanager
 from threading import Thread
 from uuid import UUID
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Response, status
 
 from .broker import consume_forever
+from .clients import ContextNotFound
 from .database import feedback_database
-from .feedback import feedback_processor
-from .schemas import FeedbackRequestBody, FeedbackResponse, SubmissionContext
+from .feedback import SubmissionNotJudged, feedback_processor
+from .schemas import FeedbackResponse
+
+logging.basicConfig(level=logging.INFO)
+
+# The gateway verifies the login token and forwards the user as X-User-Id
+# (docs/contracts.md). This service must only be reachable through it.
+UserId = Header(..., alias="X-User-Id", min_length=1, max_length=200)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     feedback_database.initialize()
-    worker = Thread(
+    feedback_processor.start()
+    Thread(
         target=consume_forever,
         args=(feedback_processor.process_failed_verdict,),
         name="failed-verdict-consumer",
         daemon=True,
-    )
-    worker.start()
+    ).start()
     yield
+    feedback_processor.stop()
 
 
 app = FastAPI(
     title="AI Feedback Service",
-    description="Request and retrieve feedback generated for code submissions.",
-    version="0.2.0",
+    description=(
+        "Feedback on code submissions. Source code comes from the Submission Service and the "
+        "problem statement and test cases from Catalog; only sample cases are ever shown to the model."
+    ),
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -34,55 +47,34 @@ app = FastAPI(
 @app.post(
     "/submissions/{submission_id}/feedback",
     response_model=FeedbackResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Request AI feedback",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Request AI feedback for a judged submission",
     responses={
-        202: {"model": FeedbackResponse, "description": "Feedback generation is still in progress."},
-        503: {"model": FeedbackResponse, "description": "Feedback generation is unavailable."},
+        200: {"model": FeedbackResponse, "description": "Feedback for this submission is already ready."},
+        202: {"model": FeedbackResponse, "description": "Queued or processing; poll GET /feedback-requests/{request_id}."},
+        404: {"description": "No such submission for this user."},
+        409: {"description": "The submission has not been judged yet."},
+        502: {"description": "The Submission Service could not be reached."},
     },
 )
-def request_feedback(
-    submission_id: UUID,
-    body: FeedbackRequestBody,
-    response: Response,
-    x_user_id: str = Header(..., alias="X-User-ID", min_length=1, max_length=200),
-    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=200),
-) -> dict:
-    """Generate and store feedback from supplied context (for Swagger/dev use)."""
-    context = SubmissionContext(
-        submission_id=submission_id,
-        user_id=x_user_id,
-        problem_id=body.problem.problem_id,
-        language=body.language,
-        source_code=body.source_code,
-        problem_title=body.problem.title,
-        problem_statement=body.problem.statement,
-        constraints=body.problem.constraints,
-    )
+def request_feedback(submission_id: UUID, response: Response, x_user_id: str = UserId) -> dict:
+    """Works for any final verdict, accepted included. Returns the existing request
+    when one is queued, processing or ready for this submission (including the
+    automatic one made for a failed verdict); asks again only after 'unavailable'."""
     try:
-        row = feedback_processor.request_feedback(
-            submission_id=submission_id,
-            user_id=x_user_id,
-            verdict=body.verdict,
-            rejudge_seq=0,
-            trigger="user_request",
-            idempotency_key=f"user:{submission_id}:{idempotency_key}",
-            context=context,
-        )
-    except Exception as exc:
-        failed = feedback_database.get_request_by_key(
-            f"user:{submission_id}:{idempotency_key}", x_user_id
-        )
-        if failed is None:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Feedback generation failed before the request could be saved.",
-            ) from exc
-        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return failed
+        row, _created = feedback_processor.request_on_demand(submission_id, x_user_id)
+    except ContextNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found") from exc
+    except SubmissionNotJudged as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The Submission Service is unavailable; try again shortly.",
+        ) from exc
 
-    if row["status"] != "ready":
-        response.status_code = status.HTTP_202_ACCEPTED
+    if row["status"] == "ready":
+        response.status_code = status.HTTP_200_OK
     return row
 
 
@@ -92,10 +84,7 @@ def request_feedback(
     summary="Get feedback request status and result",
     responses={404: {"description": "Request not found for this user."}},
 )
-def get_feedback_request(
-    request_id: UUID,
-    x_user_id: str = Header(..., alias="X-User-ID", min_length=1, max_length=200),
-) -> dict:
+def get_feedback_request(request_id: UUID, x_user_id: str = UserId) -> dict:
     row = feedback_database.get_request(request_id, x_user_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Feedback request not found")
@@ -105,14 +94,16 @@ def get_feedback_request(
 @app.get(
     "/submissions/{submission_id}/feedback",
     response_model=FeedbackResponse,
-    summary="Get the latest saved feedback for a submission",
+    summary="Get the latest feedback request for a submission",
     responses={404: {"description": "No feedback exists for this submission and user."}},
 )
-def get_submission_feedback(
-    submission_id: UUID,
-    x_user_id: str = Header(..., alias="X-User-ID", min_length=1, max_length=200),
-) -> dict:
+def get_submission_feedback(submission_id: UUID, x_user_id: str = UserId) -> dict:
     row = feedback_database.get_latest_for_submission(submission_id, x_user_id)
     if row is None:
-        raise HTTPException(status_code=404, detail="No saved feedback for this submission")
+        raise HTTPException(status_code=404, detail="No feedback for this submission")
     return row
+
+
+@app.get("/health", summary="Liveness probe")
+def health() -> dict:
+    return {"status": "ok"}
