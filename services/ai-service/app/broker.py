@@ -6,21 +6,26 @@ import pika
 from pydantic import ValidationError
 
 from .config import settings
-from .models import FailedVerdictEvent
+from .models import FailedVerdictEvent, normalize_verdict
 
 logger = logging.getLogger("ai_service.broker")
 
+# The Judge Worker publishes verdict.<verdict> in lowercase (docs/contracts.md).
+# verdict.compile_error is the older name, kept so either form is received.
 FAILURE_ROUTING_KEYS = (
     "verdict.wrong_answer",
     "verdict.time_limit_exceeded",
     "verdict.memory_limit_exceeded",
     "verdict.runtime_error",
+    "verdict.compilation_error",
     "verdict.compile_error",
 )
 
 
 def declare_topology(channel) -> None:
-    """Declare a private durable queue bound to failed verdicts only."""
+    """Declare a private durable queue bound to failed verdicts only. The exchanges
+    already exist from deploy/rabbitmq/definitions.json; re-declaring them with the
+    same arguments is harmless and lets the service start against a bare broker."""
     channel.exchange_declare(
         exchange=settings.verdicts_exchange,
         exchange_type="topic",
@@ -53,7 +58,7 @@ def declare_topology(channel) -> None:
         )
 
 
-def _on_message(process_event: Callable[[FailedVerdictEvent], None]):
+def _on_message(process_event: Callable[[FailedVerdictEvent], object]):
     def callback(channel, method, _properties, body: bytes) -> None:
         try:
             event = FailedVerdictEvent.model_validate_json(body)
@@ -63,8 +68,8 @@ def _on_message(process_event: Callable[[FailedVerdictEvent], None]):
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
-        expected_key = f"verdict.{event.verdict.value}"
-        if method.routing_key != expected_key:
+        routed_verdict = normalize_verdict(method.routing_key.removeprefix("verdict."))
+        if routed_verdict != event.verdict.value:
             logger.error(
                 "routing key %s does not match event verdict %s; dead-lettering",
                 method.routing_key,
@@ -74,22 +79,23 @@ def _on_message(process_event: Callable[[FailedVerdictEvent], None]):
             return
 
         try:
-            # Ack only after mock context retrieval and LLM generation complete.
+            # Ack once the request row is saved. Generation runs in the background
+            # (it can take longer than the broker heartbeat), and the sweep resumes
+            # any queued row if the process dies before finishing it.
             process_event(event)
             channel.basic_ack(delivery_tag=method.delivery_tag)
         except Exception:
-            # Transient failures are retried by RabbitMQ; idempotency is needed
-            # once the handler performs external work or persists feedback.
             logger.exception(
-                "failed processing submission %s; requeueing verdict",
+                "failed saving request for submission %s; requeueing verdict",
                 event.submission_id,
             )
+            time.sleep(1)  # avoid a hot redelivery loop while the database is down
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
     return callback
 
 
-def _consume_once(process_event: Callable[[FailedVerdictEvent], None]) -> None:
+def _consume_once(process_event: Callable[[FailedVerdictEvent], object]) -> None:
     connection = pika.BlockingConnection(pika.URLParameters(settings.rabbitmq_url))
     try:
         channel = connection.channel()
@@ -111,16 +117,13 @@ def _consume_once(process_event: Callable[[FailedVerdictEvent], None]) -> None:
             connection.close()
 
 
-def consume_forever(process_event: Callable[[FailedVerdictEvent], None]) -> None:
+def consume_forever(process_event: Callable[[FailedVerdictEvent], object]) -> None:
     """Reconnect to RabbitMQ with bounded exponential backoff."""
     delay = 1
     while True:
         try:
             _consume_once(process_event)
             delay = 1
-        except KeyboardInterrupt:
-            logger.info("AI verdict consumer stopped")
-            return
         except Exception:
             logger.exception("RabbitMQ connection failed; retrying in %ss", delay)
             time.sleep(delay)

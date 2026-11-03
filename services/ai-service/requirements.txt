@@ -5,3 +5,4 @@ pydantic-settings>=2.5
 psycopg[binary]>=3.2
 fastapi>=0.115
 uvicorn[standard]>=0.30
+pytest>=8.3
