@@ -46,13 +46,13 @@ cd services/judge-worker && .venv/bin/python -m app.main &
 services/judge-worker/.venv/bin/python scripts/dev/e2e_smoke_test.py
 ```
 
-Expect: a verdict printed with `"verdict": "accepted"`, and the script exits 0.
+Expect: a verdict printed with `"verdict": "ACCEPTED"`, and the script exits 0.
 
 Check things are healthy at any point:
 ```
 curl -s http://localhost:8081/health   # spawner pool state
-curl -s http://localhost:8082/health   # judge worker
-curl -s -u guest:guest http://localhost:15672/api/queues/%2F/judge.jobs   # queue depth, should be 0 ready/unacked after the test
+curl -s http://localhost:8083/health   # judge worker
+curl -s -u judge:judge http://localhost:15672/api/queues/%2F/jobs.queue   # queue depth, should be 0 ready/unacked after the test
 ```
 
 Stop everything:

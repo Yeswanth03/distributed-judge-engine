@@ -7,6 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
-EXPOSE 8082
+EXPOSE 8083
 
 CMD ["python", "-m", "app.main"]
