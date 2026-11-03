@@ -49,8 +49,10 @@ class InternalTestsetTest {
         jdbc.sql("TRUNCATE test_cases, testsets, problems CASCADE").update();
         problemId = UUID.randomUUID();
         jdbc.sql("""
-                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
-                VALUES (:id, 'two-sum', 'Two Sum', 'Find the pair.', 'easy', 100, 1500, 128)
+                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,
+                                      function_name, parameters, return_type, starter_code)
+                VALUES (:id, 'two-sum', 'Two Sum', 'Find the pair.', 'easy', 100, 1500, 128, 'twoSum',
+                        '[{"name":"nums","type":"int[]"},{"name":"target","type":"int"}]', 'int[]', 'class Solution: ...')
                 """)
                 .param("id", problemId)
                 .update();
@@ -68,6 +70,11 @@ class InternalTestsetTest {
                 .andExpect(jsonPath("$.content_hash").value("hash-v1"))
                 .andExpect(jsonPath("$.time_limit_ms").value(1500))
                 .andExpect(jsonPath("$.memory_limit_mb").value(128))
+                .andExpect(jsonPath("$.function_name").value("twoSum"))
+                .andExpect(jsonPath("$.parameters[0].name").value("nums"))
+                .andExpect(jsonPath("$.parameters[0].type").value("int[]"))
+                .andExpect(jsonPath("$.parameters[1].name").value("target"))
+                .andExpect(jsonPath("$.return_type").value("int[]"))
                 .andExpect(jsonPath("$.cases", hasSize(2)))
                 .andExpect(jsonPath("$.cases[0].ordinal").value(1))
                 .andExpect(jsonPath("$.cases[0].is_sample").value(true))

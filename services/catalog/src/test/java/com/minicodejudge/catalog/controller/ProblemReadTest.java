@@ -61,6 +61,7 @@ class ProblemReadTest {
                 .andExpect(jsonPath("$.id").value(id.toString()))
                 .andExpect(jsonPath("$.statement_md").value("Statement of two-sum"))
                 .andExpect(jsonPath("$.time_limit_ms").value(1000))
+                .andExpect(jsonPath("$.starter_code").value("class Solution: starter"))
                 .andExpect(jsonPath("$.samples", hasSize(2)))
                 .andExpect(jsonPath("$.samples[0].input").value("1"))
                 .andExpect(jsonPath("$.samples[1].expected_output").value("c"))
@@ -166,8 +167,10 @@ class ProblemReadTest {
     private UUID problem(String slug, String difficulty) {
         UUID id = UUID.randomUUID();
         jdbc.sql("""
-                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
-                VALUES (:id, :slug, :title, :statement, :difficulty, 100, 1000, 256)
+                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,
+                                      function_name, parameters, return_type, starter_code)
+                VALUES (:id, :slug, :title, :statement, :difficulty, 100, 1000, 256, 'solve',
+                        '[{"name":"n","type":"int"}]', 'int', 'class Solution: starter')
                 """)
                 .param("id", id).param("slug", slug).param("title", "Title of " + slug)
                 .param("statement", "Statement of " + slug).param("difficulty", difficulty)
