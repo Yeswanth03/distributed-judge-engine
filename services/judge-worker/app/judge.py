@@ -9,7 +9,8 @@ def judge_submission(job: Job, catalog: CatalogClient, spawner: SpawnerClient, w
     testset = catalog.get_testset(job.problem_id)
 
     results: list[TestResult] = []
-    verdict = "accepted"
+    verdict = "ACCEPTED"
+    error_message = None
     total_time_ms = 0
     max_memory_kb = 0
 
@@ -17,14 +18,14 @@ def judge_submission(job: Job, catalog: CatalogClient, spawner: SpawnerClient, w
         exec_result = spawner.execute(
             submission_id=job.submission_id,
             language=job.language,
-            source_code=job.source_code,
+            source_code=job.code,
             stdin=case["input"],
             time_limit_ms=testset["time_limit_ms"],
             memory_limit_mb=testset["memory_limit_mb"],
         )
 
         case_verdict = _classify(exec_result, case["expected_output"])
-        passed = case_verdict == "accepted"
+        passed = case_verdict == "ACCEPTED"
 
         results.append(
             TestResult(
@@ -39,6 +40,9 @@ def judge_submission(job: Job, catalog: CatalogClient, spawner: SpawnerClient, w
 
         if not passed:
             verdict = case_verdict
+            if verdict == "RUNTIME_ERROR":
+                # Not stderr: a submission could print the hidden test input there.
+                error_message = f"Program exited with code {exec_result['exit_code']}"
             break  # stop at the first failing case, like most judges do
 
     return Verdict(
@@ -49,23 +53,26 @@ def judge_submission(job: Job, catalog: CatalogClient, spawner: SpawnerClient, w
         verdict=verdict,
         rejudge_seq=0,  # always 0 until re-judging a submission is built
         judged_at=datetime.now(timezone.utc).isoformat(),
+        execution_time_ms=total_time_ms,
+        memory_kb=max_memory_kb or None,
+        test_cases_passed=sum(r.passed for r in results),
+        total_test_cases=len(testset["cases"]),
+        error_message=error_message,
         test_results=results,
-        total_time_ms=total_time_ms,
-        max_memory_kb=max_memory_kb or None,
         content_hash=testset["content_hash"],
         worker_id=worker_id,
     )
 
 
 def _classify(exec_result: dict, expected_output: str) -> str:
-    """Lowercase snake_case values, matching Catalog's VerdictMessageParser and
-    its 'verdict.<status>' routing key convention exactly."""
+    """The verdict values in docs/contracts.md. Catalog's VerdictMessageParser
+    lowercases whatever it receives, so this suits both consumers."""
     if exec_result["timed_out"]:
-        return "time_limit_exceeded"
+        return "TIME_LIMIT_EXCEEDED"
     if exec_result["oom_killed"]:
-        return "memory_limit_exceeded"
+        return "MEMORY_LIMIT_EXCEEDED"
     if exec_result["exit_code"] != 0:
-        return "runtime_error"
+        return "RUNTIME_ERROR"
     if exec_result["stdout"].strip() != expected_output.strip():
-        return "wrong_answer"
-    return "accepted"
+        return "WRONG_ANSWER"
+    return "ACCEPTED"

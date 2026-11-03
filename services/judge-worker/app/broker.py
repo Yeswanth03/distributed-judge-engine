@@ -4,7 +4,7 @@ import time
 import pika
 
 from .config import settings
-from .models import Job, Verdict
+from .models import Job, RunningEvent, Verdict
 
 logger = logging.getLogger("judge_worker.broker")
 
@@ -16,12 +16,46 @@ def publish_verdict(channel, verdict: Verdict):
     # RabbitConfig.java) so Catalog's own queue actually receives this, and so
     # other consumers (e.g. the AI Service, which only wants failures) can bind
     # selectively on "verdict.wrong_answer" etc. instead of getting everything.
+    _publish(channel, f"verdict.{verdict.verdict.lower()}", verdict)
+
+
+def publish_running(channel, event: RunningEvent):
+    # Not under "verdict.": Catalog would dead-letter it as an incomplete verdict.
+    _publish(channel, "status.running", event)
+
+
+def _publish(channel, routing_key: str, event: RunningEvent | Verdict):
     channel.basic_publish(
         exchange=settings.verdicts_exchange,
-        routing_key=f"verdict.{verdict.verdict}",
-        body=verdict.model_dump_json().encode("utf-8"),
-        properties=pika.BasicProperties(delivery_mode=2),  # persistent
+        routing_key=routing_key,
+        body=event.model_dump_json().encode("utf-8"),
+        properties=pika.BasicProperties(
+            delivery_mode=2,  # persistent
+            content_type="application/json",
+            message_id=event.submission_id,
+        ),
     )
+
+
+def declare_topology(channel):
+    """Idempotent. The definitions file normally creates all of this first;
+    declaring it here too means the worker also starts cleanly against a broker
+    that was set up without that file."""
+    channel.exchange_declare(exchange=settings.dead_letter_exchange, exchange_type="direct", durable=True)
+    channel.queue_declare(queue=settings.jobs_dlq, durable=True, arguments={"x-queue-type": "quorum"})
+    channel.queue_bind(queue=settings.jobs_dlq, exchange=settings.dead_letter_exchange, routing_key=settings.jobs_dlq)
+    channel.queue_declare(
+        queue=settings.jobs_queue,
+        durable=True,
+        arguments={
+            "x-queue-type": "quorum",
+            "x-delivery-limit": settings.jobs_delivery_limit,
+            "x-dead-letter-exchange": settings.dead_letter_exchange,
+            "x-dead-letter-routing-key": settings.jobs_dlq,
+        },
+    )
+    # Must match Catalog's RabbitConfig.java exactly: topic exchange "verdicts".
+    channel.exchange_declare(exchange=settings.verdicts_exchange, exchange_type="topic", durable=True)
 
 
 def consume_forever(judge_fn):
@@ -56,17 +90,19 @@ def _consume_once(judge_fn):
     """
     connection = pika.BlockingConnection(pika.URLParameters(settings.rabbitmq_url))
     channel = connection.channel()
-    channel.queue_declare(queue=settings.jobs_queue, durable=True)
-    # Declared idempotently here too (Catalog's RabbitConfig also declares it)
-    # in case this worker starts before Catalog does. Must match exactly:
-    # topic exchange named "verdicts", not the fanout "judge.verdicts" this
-    # used to be, which would have meant Catalog's queue never got anything.
-    channel.exchange_declare(exchange=settings.verdicts_exchange, exchange_type="topic", durable=True)
+    declare_topology(channel)
+    # Publishes now raise if the broker refuses a message, so a verdict it never
+    # took can't be acked away (the job gets nacked and redelivered instead).
+    channel.confirm_delivery()
     channel.basic_qos(prefetch_count=1)
 
     def on_message(ch, method, _properties, body):
         try:
             job = Job.model_validate_json(body)
+            publish_running(
+                ch,
+                RunningEvent(submission_id=job.submission_id, user_id=job.user_id, problem_id=job.problem_id),
+            )
             verdict = judge_fn(job)
             publish_verdict(ch, verdict)
             ch.basic_ack(delivery_tag=method.delivery_tag)

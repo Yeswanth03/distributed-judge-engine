@@ -1,2 +1,0 @@
-CREATE DATABASE catalog;
-CREATE DATABASE ai_feedback;
