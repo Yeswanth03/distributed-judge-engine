@@ -127,7 +127,7 @@ class FeedbackProcessor:
     def _load_context(self, row: dict) -> FeedbackContext:
         details = row.get("judge_details") or {}
         submission = self.submissions.get_submission(str(row["submission_id"]), row["user_id"])
-        problem = self.catalog.get_problem(submission.problem_slug, details.get("testset_version"))
+        problem = self.catalog.get_problem(submission.problem_ref, details.get("testset_version"))
 
         # The Submission Service may not have applied the verdict yet when the AI
         # service sees the same event, so its counters are only a fallback.

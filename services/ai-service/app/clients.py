@@ -1,12 +1,13 @@
 """HTTP clients for the services that hold a submission's context.
 
 The flow mirrors what the Judge Worker already does:
-  Submission Service  GET /api/v1/submissions/{id}?include=code  -> code, language, problem slug, verdict
-  Catalog             GET /problems/{slug}                       -> problem UUID, statement, limits
+  Submission Service  GET /api/v1/submissions/{id}?include=code  -> code, language, problem UUID, verdict
+  Catalog             GET /problems (UUID -> slug), GET /problems/{slug} -> statement, limits
   Catalog             GET /internal/problems/{uuid}/testset      -> test cases (X-Service-Token)
 """
 
 from dataclasses import dataclass, field
+from uuid import UUID
 
 import httpx
 
@@ -22,7 +23,7 @@ class ContextNotFound(Exception):
 class SubmissionDetails:
     submission_id: str
     user_id: str
-    problem_slug: str
+    problem_ref: str
     language: str
     code: str
     status: str
@@ -88,7 +89,7 @@ class SubmissionClient:
         return SubmissionDetails(
             submission_id=str(body["submission_id"]),
             user_id=str(body["user_id"]),
-            problem_slug=body["problem_id"],
+            problem_ref=body["problem_id"],
             language=body["language"],
             code=code,
             status=body.get("status", ""),
@@ -106,9 +107,31 @@ class CatalogClient:
             timeout=settings.http_timeout_seconds,
         )
 
-    def get_problem(self, slug: str, testset_version: int | None = None) -> ProblemDetails:
-        """Problem statement from the public read, then the test cases from the
+    def _slug_for(self, problem_id: str) -> str:
+        """Catalog's public read is by slug, but submissions store the problem's UUID.
+        The public list returns id and slug for every published problem, so page
+        through it (only published problems can be judged anyway)."""
+        cursor = None
+        while True:
+            params = {"limit": 100, **({"cursor": cursor} if cursor else {})}
+            resp = self._client.get("/problems", params=params)
+            resp.raise_for_status()
+            page = resp.json()
+            for item in page.get("items", []):
+                if str(item.get("id")) == problem_id:
+                    return item["slug"]
+            cursor = page.get("next_cursor")
+            if not cursor:
+                raise ContextNotFound(f"problem {problem_id} is not a published Catalog problem")
+
+    def get_problem(self, problem_ref: str, testset_version: int | None = None) -> ProblemDetails:
+        """problem_ref is the problem's UUID (what the Submission Service stores) or
+        its slug. Statement from the public read, then the test cases from the
         judge-only endpoint. testset_version pins the exact version that was judged."""
+        try:
+            slug = self._slug_for(str(UUID(problem_ref)))
+        except ValueError:
+            slug = problem_ref
         resp = self._client.get(f"/problems/{slug}")
         if resp.status_code in (400, 404):
             raise ContextNotFound(f"problem {slug} not found in Catalog")

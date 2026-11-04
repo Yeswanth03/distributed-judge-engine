@@ -27,7 +27,7 @@ def verdict_event(**overrides) -> dict:
     event = {
         "submission_id": SUBMISSION,
         "user_id": USER,
-        "problem_id": "sum-two",
+        "problem_id": PROBLEM_UUID,
         "testset_version": 1,
         "status": "COMPLETED",
         "verdict": "WRONG_ANSWER",
@@ -286,3 +286,28 @@ def test_api_errors(client, services):
 def test_api_takes_no_request_body():
     schema = api.app.openapi()["paths"]["/submissions/{submission_id}/feedback"]["post"]
     assert "requestBody" not in schema
+
+
+def test_problem_uuid_is_resolved_through_catalog_list(processor, services):
+    # The real Submission Service stores Catalog's UUID; Catalog's public read is by slug.
+    row = processor.process_failed_verdict(FailedVerdictEvent.model_validate(verdict_event()))
+    processor.generate(row["request_id"])
+    assert processor.database.rows[row["request_id"]]["status"] == "ready"
+    list_calls = [r for r in services.requests if r.url.path == "/problems"]
+    assert len(list_calls) == 2  # followed next_cursor to the second page
+
+
+def test_slug_problem_ref_still_works(processor, services):
+    services.submission["problem_id"] = "sum-two"
+    row = processor.process_failed_verdict(FailedVerdictEvent.model_validate(verdict_event()))
+    processor.generate(row["request_id"])
+    assert processor.database.rows[row["request_id"]]["status"] == "ready"
+    assert not [r for r in services.requests if r.url.path == "/problems"]
+
+
+def test_unpublished_problem_uuid_is_unavailable(processor, services):
+    services.submission["problem_id"] = "33333333-3333-3333-3333-333333333333"
+    row = processor.process_failed_verdict(FailedVerdictEvent.model_validate(verdict_event()))
+    processor.generate(row["request_id"])
+    saved = processor.database.rows[row["request_id"]]
+    assert saved["status"] == "unavailable" and "not a published" in saved["error_reason"]
