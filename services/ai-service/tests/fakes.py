@@ -25,7 +25,7 @@ def submission_body(**overrides) -> dict:
     body = {
         "submission_id": SUBMISSION,
         "user_id": USER,
-        "problem_id": "sum-two",
+        "problem_id": PROBLEM_UUID,
         "language": "python",
         "code": "a, b = map(int, input().split())\nprint(a - b)",
         "status": "COMPLETED",
@@ -92,6 +92,14 @@ class FakeServices:
             return httpx.Response(200, json=body)
         if path.startswith("/api/v1/submissions/"):
             return httpx.Response(404, json={"error": "not_found", "message": "submission not found"})
+        if path == "/problems":
+            # Public list, paged like Catalog's: id and slug of each published problem.
+            other = {"id": "22222222-2222-2222-2222-222222222222", "slug": "aaa-first",
+                     "title": "First", "difficulty": "easy", "points": 10}
+            mine = {k: PROBLEM[k] for k in ("id", "slug", "title", "difficulty", "points")}
+            if request.url.params.get("cursor") == "aaa-first":
+                return httpx.Response(200, json={"items": [mine], "next_cursor": None})
+            return httpx.Response(200, json={"items": [other], "next_cursor": "aaa-first"})
         if path == "/problems/sum-two":
             if self.problem_status != 200:
                 return httpx.Response(self.problem_status, json={"error": "x", "message": "x"})
