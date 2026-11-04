@@ -31,7 +31,9 @@ docker compose up -d postgres rabbitmq
 The `ai_feedback` database is created by `deploy/postgres/init`. The service applies
 its own migrations (`db/migration`) at startup.
 
-Start Ollama and pull the model (`ollama pull llama3.2`). Run the Submission
+Start Ollama and pull the model (`ollama pull qwen2.5-coder:7b`, about 4.7 GB). It is a
+code-specialized model and gave far more accurate feedback than `llama3.2`; any installed
+model can be used instead through `AI_OLLAMA_MODEL`. Run the Submission
 Service (host port 8082) and Catalog (8080). Then:
 
 ```bash
@@ -123,7 +125,7 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_HTTP_TIMEOUT_SECONDS` | `5` | Timeout for Submission/Catalog calls |
 | `AI_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/ai_feedback` | AI database |
 | `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
-| `AI_OLLAMA_MODEL` | `llama3.2` | Installed local model name |
+| `AI_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Installed local model name |
 | `AI_OLLAMA_TIMEOUT_SECONDS` | `120` | Ollama request timeout |
 | `AI_PROMPT_VERSION` | `2` | Prompt version stored with each response |
 | `AI_GENERATION_WORKERS` | `2` | Concurrent generations |
