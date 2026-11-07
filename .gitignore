@@ -5,10 +5,18 @@
 .env
 
 ### Python (services/spawner, services/judge-worker) ###
-.venv/
+.venv*/
 __pycache__/
 *.pyc
 .pytest_cache/
+*.log
+.coverage
+htmlcov/
+
+### Local environment files (keep .env.example tracked) ###
+.env
+.env.*
+!.env.example
 
 ### macOS ###
 .DS_Store
