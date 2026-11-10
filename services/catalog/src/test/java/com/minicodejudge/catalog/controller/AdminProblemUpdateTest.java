@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +36,12 @@ class AdminProblemUpdateTest {
     static PostgreSQLContainer postgres = new PostgreSQLContainer("postgres:16-alpine");
 
     private static final ObjectMapper JSON = new ObjectMapper();
+
+    private static final String STARTER = """
+            class Solution:
+                def twoSum(self, nums: list[int], target: int) -> list[int]:
+                    pass
+            """;
 
     @Autowired
     MockMvc mvc;
@@ -128,6 +135,23 @@ class AdminProblemUpdateTest {
         assertThat(row).containsEntry("title", "Two Sum II").containsEntry("statement_md", "Updated statement.");
     }
 
+    @Test
+    void functionDetailsLockOnPublish() throws Exception {
+        update(id.toString(), validBody()).andExpect(status().isNoContent());
+        publish();
+
+        Map<String, Object> changed = validBody();
+        changed.put("return_type", "int");
+        update(id.toString(), changed).andExpect(status().isConflict());
+
+        Map<String, Object> newStarter = validBody();
+        newStarter.put("starter_code", STARTER + "# changed\n");
+        update(id.toString(), newStarter).andExpect(status().isConflict());
+
+        update(id.toString(), validBody()).andExpect(status().isNoContent());
+        assertThat(jdbc.sql("SELECT return_type FROM problems").query(String.class).single()).isEqualTo("int[]");
+    }
+
     // ---- helpers ----
 
     private ResultActions update(String problemId, Map<String, Object> body) throws Exception {
@@ -146,6 +170,11 @@ class AdminProblemUpdateTest {
         body.put("points", 200);
         body.put("time_limit_ms", 2000);
         body.put("memory_limit_mb", 512);
+        body.put("function_name", "twoSum");
+        body.put("parameters", List.of(
+                Map.of("name", "nums", "type", "int[]"), Map.of("name", "target", "type", "int")));
+        body.put("return_type", "int[]");
+        body.put("starter_code", STARTER);
         return body;
     }
 

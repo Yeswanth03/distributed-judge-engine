@@ -1,5 +1,8 @@
 """Generates src/main/resources/db/sample/R__sample_problems.sql: five published problems for local testing.
 
+Each problem is a function to implement (method of class Solution). Cases are JSON: input holds the arguments and
+expected_output the return value, in the same compact form the service stores.
+
 Each problem gets two published test-set versions (v2 is current) of 20 cases each; the first two cases are samples.
 v2 adds large cases (n up to 2·10^5, grids up to 1000 x 1000) that an O(n²) brute force cannot finish in time.
 Every expected output is computed by the reference solution below, and each reference is cross-checked against a
@@ -10,6 +13,7 @@ Run from services/catalog:  python3 scripts/generate_sample_data.py
 """
 
 import hashlib
+import json
 import random
 import struct
 import uuid
@@ -20,6 +24,10 @@ OUT = Path(__file__).resolve().parent.parent / "src/main/resources/db/sample/R__
 NAMESPACE = uuid.UUID("6f1c2a52-5d3e-4c1b-9a57-1b0e8f3d2c10")
 MAX_FIELD = 4 * 1024 * 1024  # TestsetDtos.MAX_CASE_FIELD_CHARS
 CASES_PER_SET = 20
+
+
+def js(value):
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
 # ---------------------------------------------------------------- two-sum
@@ -52,7 +60,7 @@ def two_sum_case(nums, target):
     i, j = two_sum(nums, target)
     if len(nums) <= 300:
         assert (i, j) == two_sum_brute(nums, target)
-    return " ".join(map(str, nums)) + "\n" + str(target) + "\n", f"{i} {j}"
+    return js({"nums": nums, "target": target}), js([i, j])
 
 
 def two_sum_random(rng, n, lo, hi):
@@ -131,7 +139,7 @@ def parens_case(s):
     answer = valid_parens(s)
     if len(s) <= 2000:
         assert answer == valid_parens_brute(s)
-    return s + "\n", "true" if answer else "false"
+    return js({"s": s}), js(answer)
 
 
 def balanced(rng, n):
@@ -216,7 +224,7 @@ def subarray_case(a):
     answer = max_subarray(a)
     if len(a) <= 300:
         assert answer == max_subarray_brute(a)
-    return " ".join(map(str, a)) + "\n", str(answer)
+    return js({"nums": a}), js(answer)
 
 
 def subarray_sets():
@@ -285,7 +293,7 @@ def unique_case(s):
     answer = longest_unique(s)
     if len(s) <= 3000:
         assert answer == longest_unique_brute(s)
-    return s + "\n", str(answer)
+    return js({"s": s}), js(answer)
 
 
 def unique_sets():
@@ -362,7 +370,7 @@ def islands_brute(grid):
 def islands_case(grid):
     answer = islands(grid)
     assert answer == islands_brute(grid)
-    return f"{len(grid)} {len(grid[0])}\n" + "\n".join(grid) + "\n", str(answer)
+    return js({"grid": grid}), js(answer)
 
 
 def spiral(n):
@@ -417,143 +425,77 @@ def islands_sets():
 
 # ---------------------------------------------------------------- problems
 
+def problem(slug, title, difficulty, points, sets, function_name, parameters, return_type, python_signature, statement,
+            time_limit_ms=1000):
+    starter = f"class Solution:\n    def {function_name}(self, {python_signature}:\n        pass\n"
+    return dict(slug=slug, title=title, difficulty=difficulty, points=points, sets=sets, function_name=function_name,
+                parameters=[{"name": n, "type": t} for n, t in parameters], return_type=return_type,
+                starter_code=starter, statement=statement, time_limit_ms=time_limit_ms)
+
+
 PROBLEMS = [
-    dict(slug="two-sum", title="Two Sum", difficulty="easy", points=100, sets=two_sum_sets, statement="""\
+    problem("two-sum", "Two Sum", "easy", 100, two_sum_sets, "twoSum", [("nums", "int[]"), ("target", "int")], "int[]",
+            "nums: list[int], target: int) -> list[int]", """\
 Given a list of integers and a target, find the two positions whose values add up to the target.
 
-Exactly one pair of positions works. A position cannot be used twice.
-
-### Input
-- Line 1: the integers, separated by single spaces.
-- Line 2: the target.
-
-### Output
-The two 0-based positions `i j`, smallest first, separated by a single space.
+Exactly one pair of positions works. A position cannot be used twice. Return the two 0-based positions, smallest first.
 
 ### Constraints
-- 2 ≤ number of integers ≤ 2 × 10⁵
+- 2 ≤ length of `nums` ≤ 2 × 10⁵
 - −10⁹ ≤ each integer ≤ 10⁹
 - Exactly one answer exists.
 
 ### Example
-Input:
-```
-3 8 12 5
-17
-```
-Output:
-```
-2 3
-```
-12 + 5 = 17, and 12 and 5 are at positions 2 and 3.
+`nums = [3, 8, 12, 5]`, `target = 17` returns `[2, 3]`: 12 + 5 = 17, at positions 2 and 3.
 """),
-    dict(slug="valid-parentheses", title="Valid Parentheses", difficulty="easy", points=100, sets=parens_sets,
-         statement="""\
-A string contains only the characters `( ) [ ] { }`. Decide whether it is balanced:
+    problem("valid-parentheses", "Valid Parentheses", "easy", 100, parens_sets, "isValid", [("s", "string")], "bool",
+            "s: str) -> bool", """\
+A string contains only the characters `( ) [ ] { }`. Return whether it is balanced:
 
 - every opening bracket is closed by a bracket of the same type, and
 - brackets close in the reverse order they were opened.
 
-### Input
-One line: the string.
-
-### Output
-`true` if the string is balanced, otherwise `false`.
-
 ### Constraints
-- 1 ≤ length ≤ 2 × 10⁵
+- 1 ≤ length of `s` ≤ 2 × 10⁵
 
 ### Example
-Input:
-```
-{[()()]}
-```
-Output:
-```
-true
-```
+`s = "{[()()]}"` returns `true`.
 """),
-    dict(slug="maximum-subarray", title="Maximum Subarray", difficulty="medium", points=200, sets=subarray_sets,
-         statement="""\
-Given a list of integers, find the largest sum of a contiguous, non-empty run of them.
-
-### Input
-One line: the integers, separated by single spaces.
-
-### Output
-The largest sum.
+    problem("maximum-subarray", "Maximum Subarray", "medium", 200, subarray_sets, "maxSubArray", [("nums", "int[]")], "int",
+            "nums: list[int]) -> int", """\
+Given a list of integers, return the largest sum of a contiguous, non-empty run of them.
 
 ### Constraints
-- 1 ≤ number of integers ≤ 2 × 10⁵
+- 1 ≤ length of `nums` ≤ 2 × 10⁵
 - −10⁴ ≤ each integer ≤ 10⁴
 
 ### Example
-Input:
-```
--3 4 -1 2 -6 5
-```
-Output:
-```
-5
-```
-The run `4 -1 2` sums to 5, and so does `5` on its own.
+`nums = [-3, 4, -1, 2, -6, 5]` returns `5`: the run `4, -1, 2` sums to 5, and so does `5` on its own.
 """),
-    dict(slug="longest-substring-without-repeating-characters",
-         title="Longest Substring Without Repeating Characters", difficulty="medium", points=200, sets=unique_sets,
-         statement="""\
-Given a string, find the length of the longest contiguous piece of it in which no character appears twice.
+    problem("longest-substring-without-repeating-characters", "Longest Substring Without Repeating Characters", "medium",
+            200, unique_sets, "lengthOfLongestSubstring", [("s", "string")], "int", "s: str) -> int", """\
+Given a string, return the length of the longest contiguous piece of it in which no character appears twice.
 
-### Input
-One line: the string. It contains only letters (`a-z`, `A-Z`) and digits; upper and lower case are different
-characters.
-
-### Output
-The length of the longest such piece.
+`s` contains only letters (`a-z`, `A-Z`) and digits; upper and lower case are different characters.
 
 ### Constraints
-- 1 ≤ length ≤ 5 × 10⁴
+- 1 ≤ length of `s` ≤ 5 × 10⁴
 
 ### Example
-Input:
-```
-dvdfxd
-```
-Output:
-```
-4
-```
-The longest piece is `vdfx`.
+`s = "dvdfxd"` returns `4`: the longest piece is `vdfx`.
 """),
-    dict(slug="number-of-islands", title="Number of Islands", difficulty="hard", points=300, time_limit_ms=2000,
-         sets=islands_sets,
-         statement="""\
-A map is a grid of `1` (land) and `0` (water). Land cells that touch up, down, left or right belong to the same
-island; touching only at a corner does not connect them. Count the islands.
-
-### Input
-- Line 1: the number of rows `R` and columns `C`.
-- Next `R` lines: `C` characters each, every one `0` or `1`.
-
-### Output
-The number of islands.
+    problem("number-of-islands", "Number of Islands", "hard", 300, islands_sets, "numIslands", [("grid", "string[]")], "int",
+            "grid: list[str]) -> int", """\
+A map is a list of equal-length strings, one per row, made of `1` (land) and `0` (water). Land cells that touch up,
+down, left or right belong to the same island; touching only at a corner does not connect them. Return the number of
+islands.
 
 ### Constraints
-- 1 ≤ R, C ≤ 1000
+- 1 ≤ rows, columns ≤ 1000
 
 ### Example
-Input:
-```
-4 5
-11000
-11010
-00011
-01000
-```
-Output:
-```
-3
-```
-"""),
+`grid = ["11000", "11010", "00011", "01000"]` returns `3`.
+""", time_limit_ms=2000),
 ]
 
 
@@ -597,9 +539,12 @@ def problem_sql(p):
         "        RETURN;",
         "    END IF;",
         "",
-        "    INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)",
+        "    INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,",
+        "                          function_name, parameters, return_type, starter_code)",
         f"    VALUES ('{pid}', '{slug}', {lit(p['title'])}, {lit(p['statement'])}, '{p['difficulty']}', "
-        f"{p['points']}, {p.get('time_limit_ms', 1000)}, 256);",
+        f"{p['points']}, {p['time_limit_ms']}, 256,",
+        f"            {lit(p['function_name'])}, {lit(js(p['parameters']))}::jsonb, {lit(p['return_type'])}, "
+        f"{lit(p['starter_code'])});",
         "",
         "    INSERT INTO testsets (problem_id, version, content_hash) VALUES",
         ",\n".join(f"        ('{pid}', {v}, '{content_hash(rows)}')" for v, rows in enumerate(versions, start=1)) + ";",

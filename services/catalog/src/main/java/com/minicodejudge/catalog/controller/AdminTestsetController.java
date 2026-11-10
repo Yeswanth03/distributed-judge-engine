@@ -58,9 +58,10 @@ public class AdminTestsetController {
     @PostMapping
     @Operation(summary = "Upload a test set",
             description = "Stores the cases as the next draft version (1, 2, 3, ...). At least one case must have "
-                    + "is_sample = true; is_sample defaults to false (hidden). Up to 200 cases, each input and "
-                    + "expected_output at most 65,536 characters. Uploading to a published problem is allowed: "
-                    + "that is how test data is fixed.")
+                    + "is_sample = true; is_sample defaults to false (hidden). Each input is a JSON object of the "
+                    + "function's arguments and each expected_output a JSON value of its return_type; both are stored "
+                    + "compact. Up to 200 cases, each field at most 4 MiB. Uploading to a published problem is "
+                    + "allowed: that is how test data is fixed.")
     @ApiResponse(responseCode = "201", description = "Created; returns the new version and its content hash")
     @ApiResponse(responseCode = "400", description = "Malformed JSON body or id is not a UUID", content = @Content(
             schema = @Schema(implementation = ApiError.class),
@@ -71,7 +72,8 @@ public class AdminTestsetController {
     @ApiResponse(responseCode = "404", description = "No problem with this id", content = @Content(
             schema = @Schema(implementation = ApiError.class),
             examples = @ExampleObject(value = "{\"error\":\"not_found\",\"message\":\"problem not found\"}")))
-    @ApiResponse(responseCode = "422", description = "No sample case, no cases, or a case field breaks a rule",
+    @ApiResponse(responseCode = "422",
+            description = "No function details, no sample case, no cases, or a case does not match the function",
             content = @Content(schema = @Schema(implementation = ApiError.class), examples = @ExampleObject(
                     value = "{\"error\":\"validation_failed\",\"message\":\"cases must include at least one sample case\"}")))
     public ResponseEntity<TestsetCreated> upload(
@@ -98,6 +100,9 @@ public class AdminTestsetController {
     @ApiResponse(responseCode = "409", description = "Already published, or older than the current version",
             content = @Content(schema = @Schema(implementation = ApiError.class), examples = @ExampleObject(
                     value = "{\"error\":\"conflict\",\"message\":\"test set version 1 is already published\"}")))
+    @ApiResponse(responseCode = "422", description = "No function details, or a case no longer matches the function",
+            content = @Content(schema = @Schema(implementation = ApiError.class), examples = @ExampleObject(
+                    value = "{\"error\":\"validation_failed\",\"message\":\"cases[0].expected_output must be int[]\"}")))
     public ResponseEntity<Void> publish(
             @Parameter(description = "Problem id returned by create") @PathVariable("id") UUID id,
             @Parameter(description = "Version returned by upload", example = "1") @PathVariable("version") int version) {

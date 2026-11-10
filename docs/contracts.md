@@ -190,3 +190,28 @@ Frontend: use `EventSource`, and call `close()` after the `verdict` event. Other
 ## 5. Judge Worker → Catalog
 
 The worker fetches hidden test cases from Catalog's `/internal/...` endpoint with `X-Service-Token` (owned by the Catalog team, see their Swagger at `/swagger-ui.html`). Published test sets are immutable, so the worker can cache them by `(problem, testset_version)`.
+
+Problems are functions to implement. `GET /internal/problems/{id}/testset` returns:
+
+```json
+{
+  "problem_id": "a68b526a-ed8b-55f7-8113-80baab531c65",
+  "version": 2,
+  "content_hash": "...",
+  "time_limit_ms": 1000,
+  "memory_limit_mb": 256,
+  "function_name": "twoSum",
+  "parameters": [{ "name": "nums", "type": "int[]" }, { "name": "target", "type": "int" }],
+  "return_type": "int[]",
+  "cases": [
+    { "ordinal": 1, "input": "{\"nums\":[3,8,12,5],\"target\":17}", "expected_output": "[2,3]", "is_sample": true }
+  ]
+}
+```
+
+- `input` and `expected_output` are **strings holding compact JSON**. `input` is an object with one value per parameter; `expected_output` is a value of `return_type`.
+- Types are `int`, `float`, `bool` or `string`, optionally followed by `[]` or `[][]`.
+- The worker runs a harness around the submission: read `input`, call `Solution().<function_name>(**args)`, print the result as JSON. Compare **parsed** values, not text. Allow a small tolerance when `return_type` contains `float`.
+- `function_name`, `parameters` and `return_type` are fixed once a problem is published. They are `null` only for a problem created before function details existed.
+
+The frontend gets `starter_code` from `GET /problems/{slug}`; its `samples` use the same JSON strings.
