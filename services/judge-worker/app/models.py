@@ -29,6 +29,14 @@ class TestResult(BaseModel):
     time_ms: int
     memory_kb: int | None = None
 
+    # Only ever set for a FAILING sample case (judge.py checks case["is_sample"]
+    # before populating any of these). Never set for a hidden case, passing or
+    # not, so hidden test data can never leak through a verdict.
+    input: str | None = None
+    expected_output: str | None = None
+    actual_output: str | None = None
+    error: str | None = None
+
 
 class Verdict(BaseModel):
     """Published to the 'verdicts' topic exchange, routing key `verdict.<verdict>`

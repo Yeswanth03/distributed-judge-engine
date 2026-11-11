@@ -100,3 +100,30 @@ def test_genuine_oom_kill_by_kernel(container):
     assert result.exit_code == 137
     assert result.oom_killed is True
     assert result.timed_out is False
+
+
+def test_driver_runs_in_the_real_sandbox_and_result_is_separate_from_stdout(container):
+    # A function-style problem (docs/contracts.md section 5): the submission
+    # alone (solution.py) never runs; the driver does, imports it, and writes
+    # its own result file inside the real read-only-rootfs, no-network
+    # container, same as everything else does.
+    req = ExecuteRequest(
+        submission_id="s5",
+        language="python3.11",
+        source_code="class Solution:\n    def twoSum(self, nums, target):\n        print('debug noise')\n        return [0, 1]\n",
+        driver_code=(
+            "import json\nimport sys\nfrom solution import Solution\n\n"
+            "args = json.loads(sys.stdin.readline())\n"
+            "result = Solution().twoSum(**args)\n"
+            "with open('result.json', 'w') as f:\n    json.dump(result, f)\n"
+        ),
+        stdin='{"nums": [2, 7, 11, 15], "target": 9}\n',
+        time_limit_ms=2000,
+        memory_limit_mb=128,
+    )
+    result = run_submission(container, req)
+    assert result.exit_code == 0
+    assert result.result == "[0, 1]"
+    # The debug print landed on stdout, nowhere near the result file.
+    assert "debug noise" in result.stdout
+    assert "debug" not in result.result

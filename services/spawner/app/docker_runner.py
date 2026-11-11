@@ -12,13 +12,15 @@ from .models import ExecuteRequest, ExecuteResult
 
 WORKDIR = "/workspace/run"
 NAME_PREFIX = "spawner-sandbox-"
+DRIVER_FILENAME = "driver.py"
+RESULT_FILENAME = "result.json"
 
-# Language -> command used to run a submission inside the sandbox, relative to WORKDIR.
-# Only Python is wired up for this project; add an entry here before accepting another language.
-# "python" is the name jobs use (docs/contracts.md).
-RUN_COMMANDS = {
-    "python": "python3 solution.py",
-    "python3.11": "python3 solution.py",
+# Language -> interpreter used to run a submission (or its driver) inside the
+# sandbox. Only Python is wired up for this project; add an entry here before
+# accepting another language. "python" is the name jobs use (docs/contracts.md).
+INTERPRETERS = {
+    "python": "python3",
+    "python3.11": "python3",
 }
 SOURCE_FILENAMES = {
     "python": "solution.py",
@@ -98,11 +100,11 @@ def wipe_and_health_check(container) -> bool:
 
 
 def run_submission(container, req: ExecuteRequest) -> ExecuteResult:
-    if req.language not in RUN_COMMANDS:
+    if req.language not in INTERPRETERS:
         raise ValueError(f"unsupported language: {req.language}")
 
+    interpreter = INTERPRETERS[req.language]
     source_name = SOURCE_FILENAMES[req.language]
-    run_cmd = RUN_COMMANDS[req.language]
 
     # Files go in via live exec + stdin, never a shell heredoc (a submission's own
     # source could break out of a naively-quoted one, e.g. a line that's just "EOF")
@@ -114,13 +116,23 @@ def run_submission(container, req: ExecuteRequest) -> ExecuteResult:
     _put_file(container, WORKDIR, source_name, req.source_code)
     _put_file(container, WORKDIR, "stdin.txt", req.stdin)
 
+    # A driver (function-style problems) runs instead of the submission
+    # directly, and imports it as a module; the submission is never the thing
+    # actually executed in that case. No driver means a legacy stdin/stdout
+    # problem, which still runs on its own.
+    if req.driver_code:
+        _put_file(container, WORKDIR, DRIVER_FILENAME, req.driver_code)
+        run_target = DRIVER_FILENAME
+    else:
+        run_target = source_name
+
     time_limit_s = max(1, round(req.time_limit_ms / 1000))
     # `timeout -s KILL` kills the whole process tree on expiry. The memory.peak read
     # assumes cgroup v2 (default on current Docker Desktop/Linux); if it's missing we
     # just skip memory enforcement rather than fail the run.
     shell_cmd = (
         f"cd {WORKDIR} && "
-        f"timeout -s KILL {time_limit_s}s {run_cmd} < stdin.txt > stdout.txt 2> stderr.txt; "
+        f"timeout -s KILL {time_limit_s}s {interpreter} {run_target} < stdin.txt > stdout.txt 2> stderr.txt; "
         f"echo $? > exit_code.txt; "
         f"cat /sys/fs/cgroup/memory.peak 2>/dev/null > mem_peak.txt || echo -1 > mem_peak.txt"
     )
@@ -133,6 +145,12 @@ def run_submission(container, req: ExecuteRequest) -> ExecuteResult:
     stderr = _read_file(container, f"{WORKDIR}/stderr.txt")
     exit_code_raw = _read_file(container, f"{WORKDIR}/exit_code.txt").strip()
     mem_peak_raw = _read_file(container, f"{WORKDIR}/mem_peak.txt").strip()
+    # The driver's own result file, read back separately from stdout: a
+    # submission's own print() calls land in stdout, never here, so they can
+    # never be mistaken for the answer. Absent (empty read) if no driver ran,
+    # or if the driver crashed before writing it.
+    result = _read_file(container, f"{WORKDIR}/{RESULT_FILENAME}") if req.driver_code else ""
+    result = result if result else None
 
     exit_code = int(exit_code_raw) if exit_code_raw.lstrip("-").isdigit() else None
     try:
@@ -157,6 +175,7 @@ def run_submission(container, req: ExecuteRequest) -> ExecuteResult:
     return ExecuteResult(
         stdout=stdout,
         stderr=stderr,
+        result=result,
         exit_code=exit_code,
         wall_time_ms=wall_time_ms,
         peak_memory_kb=peak_memory_kb,
