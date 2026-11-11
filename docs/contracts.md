@@ -257,3 +257,67 @@ Poll until `status` is `COMPLETED` or `FAILED` (`FAILED` means the judge never a
 ### Messages
 - **Job** (Submission Service → `runs.queue`, through the outbox, event type `RUN_REQUESTED`): `{ "run_id", "user_id", "problem_id", "language", "code", "inputs": [...] | null, "requested_at" }`.
 - **Result** (Judge Worker → `submission-service.run-results.queue`): the `result` object above. The worker acks the job only after the result is confirmed. The Submission Service stores the first result per run; duplicates are ignored.
+
+## 7. User Service: identity, sessions and roles
+
+The User Service owns accounts, credentials, roles and sessions. It does **not** own submission history (Submission Service) or scores (Catalog): a profile page reads those from their owners.
+
+### Access tokens: what the gateway verifies
+Login returns a short-lived **access token**: a JWT signed with **ES256**. The gateway verifies it locally with the public keys from `GET /.well-known/jwks.json` (cache them for 5 minutes; pick the key by `kid`), so no request has to call the User Service to be authorised.
+
+| Claim | Meaning |
+|---|---|
+| `sub` | User ID (UUID) |
+| `role` | `user` or `admin` |
+| `sid` | Session ID |
+| `iss` | `judge-engine-user-service` |
+| `aud` | `judge-engine` |
+| `exp`, `iat`, `nbf`, `jti` | Standard; lifetime `ACCESS_TOKEN_TTL` (default 10 minutes) |
+
+The gateway must:
+- reject a request with an invalid or expired token (`401`), except on public routes (`/auth/*`, `/.well-known/jwks.json`, public Catalog reads);
+- **remove** any `X-User-Id`, `X-User-Role` and `X-Session-Id` the client sent, then set them from `sub`, `role` and `sid`;
+- never route `/internal/*`.
+
+An access token can't be revoked: a role change, a disabled account or a signed-out session takes effect within `ACCESS_TOKEN_TTL` at the latest.
+
+### Refresh tokens and sessions
+The **refresh token** is opaque and long-lived (`SESSION_TTL`, default 30 days). Each one works **once**: `POST /auth/refresh` returns a new access token and a new refresh token. Presenting a refresh token that was already used means it was copied, so the whole session is revoked. Each new access token carries the user's current role.
+
+### HTTP API
+| Route | Who | Purpose |
+|---|---|---|
+| `POST /auth/register` | anyone | `{email, username, password, display_name?}` → `201` with tokens and the user. `409 email_taken` / `username_taken`, `422 validation_failed` |
+| `POST /auth/login` | anyone | `{email, password}` → `200` with tokens. Every failure is the same `401 invalid_credentials`; a disabled account with the right password gets `403 account_disabled`. Locked for `LOGIN_LOCKOUT` after `LOGIN_MAX_FAILURES` wrong passwords in a row |
+| `POST /auth/refresh` | anyone | `{refresh_token}` → `200` with new tokens, or `401 invalid_refresh_token` |
+| `POST /auth/logout` | anyone | `{refresh_token}` → `204`, always |
+| `GET /.well-known/jwks.json` | anyone | Public keys (`Cache-Control: max-age=300`) |
+| `GET /users/me`, `PATCH /users/me` | signed in | Own profile; `PATCH` takes `{display_name}` |
+| `GET /users/me/sessions`, `DELETE /users/me/sessions/{id}` | signed in | Own devices; `current: true` marks the request's own session |
+| `GET /users?limit=&cursor=` | admin | All accounts, newest first |
+| `PATCH /users/{id}/role`, `PATCH /users/{id}/status` | admin | `{"role": "user"}` or `"admin"`; `{"status": "active"}` or `"disabled"`. Disabling revokes every session. Admins can't change their own role or status (`409 cannot_change_self`) |
+
+Token responses: `{access_token, token_type: "Bearer", expires_in, refresh_token, refresh_expires_in, user?}`.
+
+### Events: User Service → `users` exchange
+A topic exchange; the routing key is the event type. Published through an outbox, at least once.
+
+| Routing key | When |
+|---|---|
+| `user.registered` | An account was created |
+| `user.updated` | The display name changed |
+| `user.role_changed` | An admin changed the role |
+| `user.status_changed` | An admin enabled or disabled the account |
+
+```json
+{
+  "event_id": "...", "type": "user.updated", "user_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "username": "ada", "display_name": "Ada L.", "role": "user", "status": "active",
+  "version": 3, "occurred_at": "2026-11-11T12:00:00Z"
+}
+```
+
+- Every event carries the user's **full current public state**, so a consumer can simply upsert it.
+- `version` rises with every change. Keep the highest version seen per `user_id` and ignore anything older: that makes duplicates and out-of-order deliveries harmless.
+- Events never carry the email address or anything about credentials.
+- Consumers declare and bind their own queue (for example `catalog.users` on `user.#`).
