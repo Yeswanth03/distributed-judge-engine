@@ -30,6 +30,10 @@ type Config struct {
 	ReaperQueuedTimeout  time.Duration // generous: a contest burst can leave jobs queued for a while
 	ReaperRunningTimeout time.Duration
 
+	RunsPerMinute int           // per user
+	RunTimeout    time.Duration // a run with no result after this is FAILED
+	RunRetention  time.Duration // how long runs are kept
+
 	MaxCodeBytes     int
 	AllowedLanguages []string
 	CORSOrigin       string // empty disables CORS headers (the gateway serves the frontend)
@@ -70,14 +74,18 @@ func Load() (Config, error) {
 		ReaperQueuedTimeout:  r.duration("REAPER_QUEUED_TIMEOUT", 30*time.Minute),
 		ReaperRunningTimeout: r.duration("REAPER_RUNNING_TIMEOUT", 5*time.Minute),
 
+		RunsPerMinute: r.integer("RUNS_PER_MINUTE", 10),
+		RunTimeout:    r.duration("RUN_TIMEOUT", 2*time.Minute),
+		RunRetention:  r.duration("RUN_RETENTION", 24*time.Hour),
+
 		MaxCodeBytes:     r.integer("MAX_CODE_BYTES", 64*1024),
 		AllowedLanguages: r.list("ALLOWED_LANGUAGES", "python"),
 		CORSOrigin:       r.str("CORS_ORIGIN", ""),
 
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT", 15*time.Second),
 	}
-	if c.OutboxBatchSize < 1 || c.OutboxMaxRetries < 1 || c.MaxCodeBytes < 1 {
-		r.errs = append(r.errs, "OUTBOX_BATCH_SIZE, OUTBOX_MAX_RETRIES and MAX_CODE_BYTES must be positive")
+	if c.OutboxBatchSize < 1 || c.OutboxMaxRetries < 1 || c.MaxCodeBytes < 1 || c.RunsPerMinute < 1 {
+		r.errs = append(r.errs, "OUTBOX_BATCH_SIZE, OUTBOX_MAX_RETRIES, MAX_CODE_BYTES and RUNS_PER_MINUTE must be positive")
 	}
 	if len(c.AllowedLanguages) == 0 {
 		r.errs = append(r.errs, "ALLOWED_LANGUAGES must name at least one language")

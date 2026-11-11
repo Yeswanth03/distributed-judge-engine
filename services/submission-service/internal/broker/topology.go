@@ -14,6 +14,13 @@ const (
 	VerdictQueue       = "submission-service.verdict.queue"
 	VerdictDLQ         = "submission-service.verdict.dlq"
 
+	// Trial runs: jobs for the Judge Worker on their own queue, so a worker that predates runs can never mistake
+	// one for a submission, and the worker's results straight back to this service (never to Catalog).
+	RunsQueue       = "runs.queue"
+	RunsDLQ         = "runs.dlq"
+	RunResultsQueue = "submission-service.run-results.queue"
+	RunResultsDLQ   = "submission-service.run-results.dlq"
+
 	// VerdictBindingKey receives everything on the exchange: real verdicts and status events alike.
 	VerdictBindingKey = "#"
 	// StatusRoutingKey is for events Catalog must not receive (it binds verdict.# and dead-letters anything
@@ -52,6 +59,10 @@ func DeclareTopology(ch *amqp.Channel) error {
 		{JobsQueue, quorum(3, JobsDLQ)},
 		{VerdictDLQ, quorum(0, "")},
 		{VerdictQueue, quorum(5, VerdictDLQ)},
+		{RunsDLQ, quorum(0, "")},
+		{RunsQueue, quorum(3, RunsDLQ)},
+		{RunResultsDLQ, quorum(0, "")},
+		{RunResultsQueue, quorum(5, RunResultsDLQ)},
 	} {
 		if _, err := ch.QueueDeclare(q.name, true, false, false, false, q.args); err != nil {
 			return err
@@ -60,6 +71,8 @@ func DeclareTopology(ch *amqp.Channel) error {
 	for _, b := range []struct{ queue, key, exchange string }{
 		{JobsDLQ, JobsDLQ, DeadLetterExchange},
 		{VerdictDLQ, VerdictDLQ, DeadLetterExchange},
+		{RunsDLQ, RunsDLQ, DeadLetterExchange},
+		{RunResultsDLQ, RunResultsDLQ, DeadLetterExchange},
 		{VerdictQueue, VerdictBindingKey, VerdictExchange},
 	} {
 		if err := ch.QueueBind(b.queue, b.key, b.exchange, false, nil); err != nil {
