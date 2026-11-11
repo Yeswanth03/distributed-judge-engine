@@ -55,5 +55,29 @@ services:
       timeout: 3s
       retries: 10
 
+  user-service:
+    build: ./services/user-service
+    environment:
+      DATABASE_URL: postgres://users:users@postgres:5432/users?sslmode=disable
+      AMQP_URL: amqp://judge:judge@rabbitmq:5672/
+      CORS_ORIGIN: ${CORS_ORIGIN:-*}
+      # Local development only: the first admin. Change the password after signing in.
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_USERNAME: admin
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-admin-local-only}
+    ports:
+      # 8085 on the host: 8080-8084 are Catalog, Spawner, Submission Service, Judge Worker and AI Service.
+      - "${USER_SERVICE_PORT:-8085}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/server", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   postgres-data:
