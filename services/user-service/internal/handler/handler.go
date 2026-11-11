@@ -134,14 +134,16 @@ func CallerFrom(r *http.Request) (Caller, bool) {
 }
 
 // clientInfo is what a session remembers about the device: the user agent, and the client's address as the
-// gateway saw it.
+// gateway saw it. The gateway appends that address as the LAST X-Forwarded-For entry; anything before it was
+// sent by the client and can't be trusted.
 func clientInfo(r *http.Request) (userAgent, ip string) {
 	userAgent = r.UserAgent()
 	if len(userAgent) > 255 {
 		userAgent = userAgent[:255]
 	}
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		ip = strings.TrimSpace(strings.Split(fwd, ",")[0])
+	if fwd := r.Header.Values("X-Forwarded-For"); len(fwd) > 0 {
+		hops := strings.Split(fwd[len(fwd)-1], ",")
+		ip = strings.TrimSpace(hops[len(hops)-1])
 	} else if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
 		ip = host
 	}

@@ -366,3 +366,17 @@ func TestJWKSAndProbes(t *testing.T) {
 	}
 	expectError(t, ts.do(t, "GET", "/nope", nil, ""), 404, "not_found")
 }
+
+func TestClientInfoTrustsOnlyTheGatewaysAddress(t *testing.T) {
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "172.18.0.5:41000"
+	r.Header.Set("User-Agent", "test-agent")
+	if ua, ip := clientInfo(r); ua != "test-agent" || ip != "172.18.0.5" {
+		t.Fatalf("without a gateway: %q %q", ua, ip)
+	}
+	// The client claimed 6.6.6.6; the gateway appended the address it really saw.
+	r.Header.Set("X-Forwarded-For", "6.6.6.6, 203.0.113.7")
+	if _, ip := clientInfo(r); ip != "203.0.113.7" {
+		t.Fatalf("got %q, want the last entry", ip)
+	}
+}
