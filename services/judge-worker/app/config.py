@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     jobs_dlq: str = "jobs.dlq"
     dead_letter_exchange: str = "dead-letter"
     jobs_delivery_limit: int = 3
+    # Trial runs ("Run" in the editor): their own queue in, and results straight
+    # back to the Submission Service, never to the verdicts exchange.
+    runs_queue: str = "runs.queue"
+    runs_dlq: str = "runs.dlq"
+    runs_delivery_limit: int = 3
+    run_results_queue: str = "submission-service.run-results.queue"
+    run_results_dlq: str = "submission-service.run-results.dlq"
+    run_results_delivery_limit: int = 5
     # Must match Catalog's RabbitConfig.VERDICT_EXCHANGE exactly: a topic
     # exchange named "verdicts", bound by Catalog's queue on "verdict.#".
     verdicts_exchange: str = "verdicts"

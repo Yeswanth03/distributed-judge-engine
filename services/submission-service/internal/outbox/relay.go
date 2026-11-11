@@ -149,13 +149,21 @@ func (r *Relay) drain(ctx context.Context) bool {
 }
 
 func (r *Relay) publish(ctx context.Context, ev model.OutboxEvent) error {
-	return r.pub.Publish(ctx, "", broker.JobsQueue, amqp.Publishing{
+	return r.pub.Publish(ctx, "", QueueFor(ev.EventType), amqp.Publishing{
 		ContentType: "application/json",
-		MessageId:   ev.AggregateID.String(), // the submission_id, so consumers can deduplicate
+		MessageId:   ev.AggregateID.String(), // the submission_id or run_id, so consumers can deduplicate
 		Type:        ev.EventType,
 		Timestamp:   time.Now(),
 		Body:        ev.Payload,
 	})
+}
+
+// QueueFor is where an outbox event goes: trial runs to their own queue, submissions to the judge's.
+func QueueFor(eventType string) string {
+	if eventType == model.EventRunRequested {
+		return broker.RunsQueue
+	}
+	return broker.JobsQueue
 }
 
 func (r *Relay) cleanup(ctx context.Context) {

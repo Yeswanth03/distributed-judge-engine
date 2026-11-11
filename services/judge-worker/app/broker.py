@@ -4,7 +4,7 @@ import time
 import pika
 
 from .config import settings
-from .models import Job, RunningEvent, Verdict
+from .models import Job, RunJob, RunningEvent, RunResult, Verdict
 
 logger = logging.getLogger("judge_worker.broker")
 
@@ -37,28 +37,53 @@ def _publish(channel, routing_key: str, event: RunningEvent | Verdict):
     )
 
 
+def publish_run_result(channel, result: RunResult):
+    # Straight to the Submission Service's queue through the default exchange,
+    # never the verdicts exchange: a run must not reach Catalog or the AI Service.
+    # mandatory=True makes a missing queue an error instead of a silent drop.
+    channel.basic_publish(
+        exchange="",
+        routing_key=settings.run_results_queue,
+        body=result.model_dump_json().encode("utf-8"),
+        properties=pika.BasicProperties(
+            delivery_mode=2,  # persistent
+            content_type="application/json",
+            message_id=result.run_id,
+        ),
+        mandatory=True,
+    )
+
+
+def _declare_quorum_queue(channel, queue: str, dlq: str, delivery_limit: int):
+    channel.queue_declare(queue=dlq, durable=True, arguments={"x-queue-type": "quorum"})
+    channel.queue_bind(queue=dlq, exchange=settings.dead_letter_exchange, routing_key=dlq)
+    channel.queue_declare(
+        queue=queue,
+        durable=True,
+        arguments={
+            "x-queue-type": "quorum",
+            "x-delivery-limit": delivery_limit,
+            "x-dead-letter-exchange": settings.dead_letter_exchange,
+            "x-dead-letter-routing-key": dlq,
+        },
+    )
+
+
 def declare_topology(channel):
     """Idempotent. The definitions file normally creates all of this first;
     declaring it here too means the worker also starts cleanly against a broker
     that was set up without that file."""
     channel.exchange_declare(exchange=settings.dead_letter_exchange, exchange_type="direct", durable=True)
-    channel.queue_declare(queue=settings.jobs_dlq, durable=True, arguments={"x-queue-type": "quorum"})
-    channel.queue_bind(queue=settings.jobs_dlq, exchange=settings.dead_letter_exchange, routing_key=settings.jobs_dlq)
-    channel.queue_declare(
-        queue=settings.jobs_queue,
-        durable=True,
-        arguments={
-            "x-queue-type": "quorum",
-            "x-delivery-limit": settings.jobs_delivery_limit,
-            "x-dead-letter-exchange": settings.dead_letter_exchange,
-            "x-dead-letter-routing-key": settings.jobs_dlq,
-        },
+    _declare_quorum_queue(channel, settings.jobs_queue, settings.jobs_dlq, settings.jobs_delivery_limit)
+    _declare_quorum_queue(channel, settings.runs_queue, settings.runs_dlq, settings.runs_delivery_limit)
+    _declare_quorum_queue(
+        channel, settings.run_results_queue, settings.run_results_dlq, settings.run_results_delivery_limit
     )
     # Must match Catalog's RabbitConfig.java exactly: topic exchange "verdicts".
     channel.exchange_declare(exchange=settings.verdicts_exchange, exchange_type="topic", durable=True)
 
 
-def consume_forever(judge_fn):
+def consume_forever(judge_fn, run_fn):
     """Reconnects with backoff on any broker disconnect, rather than letting
     the whole worker process exit. A real bug, not hypothetical: a brief
     RabbitMQ outage (Docker Desktop's idle auto-pause, in practice) tripped
@@ -70,7 +95,7 @@ def consume_forever(judge_fn):
     delay = 1
     while True:
         try:
-            _consume_once(judge_fn)
+            _consume_once(judge_fn, run_fn)
         except Exception:
             logger.exception("broker connection lost, reconnecting in %ss", delay)
             time.sleep(delay)
@@ -79,7 +104,7 @@ def consume_forever(judge_fn):
             delay = 1  # a clean return (shouldn't normally happen) resets backoff
 
 
-def _consume_once(judge_fn):
+def _consume_once(judge_fn, run_fn):
     """Blocking consume loop for a single connection's lifetime. Acks a job
     only after its verdict is durably published, never before, so a crash
     before publishing causes a safe redelivery instead of a silently lost job
@@ -110,8 +135,20 @@ def _consume_once(judge_fn):
             logger.exception("job failed, leaving it unacked for redelivery")
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
 
+    def on_run_message(ch, method, _properties, body):
+        # Same ack-after-publish rule as a submission: a crash before the result
+        # is safely with the broker means a redelivery, never a lost run.
+        try:
+            result = run_fn(RunJob.model_validate_json(body))
+            publish_run_result(ch, result)
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+        except Exception:
+            logger.exception("run failed, leaving it unacked for redelivery")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+
     channel.basic_consume(queue=settings.jobs_queue, on_message_callback=on_message)
-    logger.info("judge worker consuming from %s", settings.jobs_queue)
+    channel.basic_consume(queue=settings.runs_queue, on_message_callback=on_run_message)
+    logger.info("judge worker consuming from %s and %s", settings.jobs_queue, settings.runs_queue)
     try:
         channel.start_consuming()
     finally:

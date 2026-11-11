@@ -66,3 +66,49 @@ class Verdict(BaseModel):
     test_results: list[TestResult]
     content_hash: str
     worker_id: str
+
+
+class RunJob(BaseModel):
+    """What the Submission Service puts on runs.queue: a trial run, never
+    scored. With no inputs the worker runs the problem's sample cases; with
+    inputs it runs those instead (docs/contracts.md)."""
+
+    run_id: str
+    user_id: str
+    problem_id: str
+    language: str
+    code: str
+    inputs: list[str] | None = None
+    requested_at: str
+
+
+class RunCase(BaseModel):
+    kind: str  # "sample" or "custom"
+    input: str
+    # Known for a sample, and for a custom input that matches a sample's.
+    expected_output: str | None = None
+    # The function's return value as JSON (stdout for a legacy stdin/stdout
+    # problem); None when the code never got that far.
+    output: str | None = None
+    # The code's own print() output, kept apart from the answer.
+    stdout: str = ""
+    error: str | None = None
+    # ACCEPTED or WRONG_ANSWER when the expected output is known, FINISHED when
+    # it isn't, otherwise TIME_LIMIT_EXCEEDED, MEMORY_LIMIT_EXCEEDED,
+    # RUNTIME_ERROR or INVALID_INPUT.
+    verdict: str
+    time_ms: int = 0
+    memory_kb: int | None = None
+
+
+class RunResult(BaseModel):
+    """Sent straight back to the Submission Service on its run-results queue,
+    never to the verdicts exchange: a run must never reach Catalog's leaderboard
+    or the AI Service."""
+
+    run_id: str
+    status: str = "COMPLETED"
+    # Over the cases with a known expected output; None when there were none.
+    verdict: str | None
+    cases: list[RunCase]
+    finished_at: str

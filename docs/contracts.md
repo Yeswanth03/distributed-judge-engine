@@ -21,6 +21,9 @@ Declared once in [deploy/rabbitmq/definitions.json](../deploy/rabbitmq/definitio
 | `catalog.verdicts` | classic queue, bound to `verdicts` on `verdict.#` | Catalog updates solves and the leaderboard. |
 | `submission-service.verdict.dlq`, `jobs.dlq` + `dead-letter` exchange | | Rejected or over-delivered messages, for inspection. |
 | `catalog.verdicts.dlq` + `verdicts.dlx` exchange | | The same for Catalog. |
+| `runs.queue` | quorum queue, `x-delivery-limit: 3` | Trial runs for the Judge Worker (section 6). Separate from `jobs.queue`, so a worker that predates runs can never score one. |
+| `submission-service.run-results.queue` | quorum queue, `x-delivery-limit: 5` | Run results, sent by the worker through the default exchange. Never on `verdicts`, so runs reach neither Catalog nor the AI Service. |
+| `runs.dlq`, `submission-service.run-results.dlq` | quorum queues, via `dead-letter` | The same for runs. |
 
 Routing keys on `verdicts`:
 
@@ -32,7 +35,7 @@ Routing keys on `verdicts`:
 
 The Submission Service also creates one **exclusive, auto-delete** queue per running instance, bound to `verdicts` on `#`. It feeds that instance's live SSE connections, so the browser gets updates whichever instance it is connected to.
 
-All messages are persistent (`delivery_mode=2`), `content_type=application/json`, with `message_id` set to the `submission_id`.
+All messages are persistent (`delivery_mode=2`), `content_type=application/json`, with `message_id` set to the `submission_id` (the `run_id` for runs).
 
 Delivery is **at-least-once**: any consumer can see the same message twice and must not double-count.
 
@@ -215,3 +218,42 @@ Problems are functions to implement. `GET /internal/problems/{id}/testset` retur
 - `function_name`, `parameters` and `return_type` are fixed once a problem is published. They are `null` only for a problem created before function details existed.
 
 The frontend gets `starter_code` from `GET /problems/{slug}`; its `samples` use the same JSON strings.
+
+## 6. Trial runs ("Run" in the editor)
+
+A run executes code against the problem's **sample cases**, or against the caller's own inputs, and shows everything: return values, the code's own prints and the full error output. It is never scored, never reaches Catalog or the AI Service, and is deleted after a day (`RUN_RETENTION`). Hidden test cases are never executed by a run.
+
+### `POST /api/v1/runs` → `202 Accepted`
+```json
+{ "problem_id": "11111111-1111-1111-1111-111111111111", "language": "python", "code": "...", "inputs": ["{\"nums\":[2,7],\"target\":9}"] }
+```
+- `inputs` is optional. Without it the samples run; with it, only these inputs run (at most 10, together at most `MAX_CODE_BYTES`). For a function problem each input is a JSON object with one value per parameter, like a case's `input`.
+- Response (also `Location: /api/v1/runs/{id}`): `{ "run_id": "...", "status": "QUEUED", "created_at": "..." }`.
+- Same validation and errors as a submission, plus `429 too_many_requests` (with `Retry-After`) above `RUNS_PER_MINUTE` runs per user per minute.
+
+### `GET /api/v1/runs/{id}` → `200 OK`
+Poll until `status` is `COMPLETED` or `FAILED` (`FAILED` means the judge never answered within `RUN_TIMEOUT`; `error_message` says so). Someone else's run answers `404`.
+```json
+{
+  "run_id": "...", "problem_id": "...", "language": "python",
+  "status": "COMPLETED", "error_message": null,
+  "result": {
+    "run_id": "...", "status": "COMPLETED", "verdict": "WRONG_ANSWER", "finished_at": "...",
+    "cases": [
+      { "kind": "sample", "input": "{\"nums\":[3,2,4],\"target\":6}", "expected_output": "[1,2]",
+        "output": "[0,2]", "stdout": "checking 3
+", "error": null, "verdict": "WRONG_ANSWER",
+        "time_ms": 41, "memory_kb": 9216 }
+    ]
+  },
+  "created_at": "...", "updated_at": "..."
+}
+```
+- `result.verdict` covers the cases whose expected output is known; it is `null` when there are none.
+- Each case's `verdict` is `ACCEPTED` or `WRONG_ANSWER` when the expected output is known, `FINISHED` when it isn't (a custom input; there is no reference solution), otherwise `TIME_LIMIT_EXCEEDED`, `MEMORY_LIMIT_EXCEEDED`, `RUNTIME_ERROR` or `INVALID_INPUT` (the input isn't a JSON object; nothing ran).
+- A custom input that equals a sample's input gets that sample's `expected_output`.
+- `output` is the return value as JSON (stdout for a legacy stdin/stdout problem), `null` if the code crashed. `stdout` is the code's own prints, kept apart from the answer. `stdout`, `output` and `error` are cut off at 10,000 characters.
+
+### Messages
+- **Job** (Submission Service → `runs.queue`, through the outbox, event type `RUN_REQUESTED`): `{ "run_id", "user_id", "problem_id", "language", "code", "inputs": [...] | null, "requested_at" }`.
+- **Result** (Judge Worker → `submission-service.run-results.queue`): the `result` object above. The worker acks the job only after the result is confirmed. The Submission Service stores the first result per run; duplicates are ignored.
