@@ -40,7 +40,11 @@ type Options struct {
 	Hub *sse.Hub
 	// Heartbeat is how often an idle SSE stream sends a keep-alive comment (default 15s).
 	Heartbeat time.Duration
-	Logger    *slog.Logger
+	// Runs serves POST /api/v1/runs and GET /api/v1/runs/{id}; without one those routes are not served.
+	Runs RunStore
+	// RunsPerMinute caps how many runs one user may start per minute (default 10).
+	RunsPerMinute int
+	Logger        *slog.Logger
 }
 
 type Handler struct {
@@ -65,6 +69,9 @@ func New(store Store, opts Options) *Handler {
 	if h.opts.Heartbeat <= 0 {
 		h.opts.Heartbeat = 15 * time.Second
 	}
+	if h.opts.RunsPerMinute <= 0 {
+		h.opts.RunsPerMinute = 10
+	}
 	return h
 }
 
@@ -76,6 +83,10 @@ func (h *Handler) Routes(metrics http.Handler) http.Handler {
 	mux.HandleFunc("GET /api/v1/submissions/{id}", h.get)
 	if h.opts.Hub != nil {
 		mux.HandleFunc("GET /api/v1/submissions/{id}/events", h.events)
+	}
+	if h.opts.Runs != nil {
+		mux.HandleFunc("POST /api/v1/runs", h.createRun)
+		mux.HandleFunc("GET /api/v1/runs/{id}", h.getRun)
 	}
 	mux.HandleFunc("GET /healthz", h.healthz)
 	mux.HandleFunc("GET /readyz", h.readyz)

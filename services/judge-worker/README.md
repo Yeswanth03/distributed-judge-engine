@@ -40,6 +40,15 @@ Catalog/Spawner clients, no broker, no Docker, no network needed.
 Queue names, the exchange and the message formats are in
 [docs/contracts.md](../../docs/contracts.md).
 
+## Trial runs
+
+The worker also consumes `runs.queue`: "Run" in the editor. A run executes the
+problem's sample cases (or the user's own inputs) and reports each case's
+return value, prints and full error output, then sends the result straight
+back to the Submission Service, never to the verdicts exchange. Hidden cases
+are never executed for a run. See `app/run.py` and section 6 of
+`docs/contracts.md`.
+
 ## Why there's no time/memory limit on the Job message
 
 Those are fixed per-problem on Catalog (`time_limit_ms`, `memory_limit_mb`) and
