@@ -122,6 +122,23 @@
       "arguments": {}
     },
     {
+      "name": "catalog.users",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "verdicts.dlx",
+        "x-dead-letter-routing-key": "catalog.users"
+      }
+    },
+    {
+      "name": "catalog.users.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {}
+    },
+    {
       "name": "runs.queue",
       "vhost": "/",
       "durable": true,
@@ -203,6 +220,22 @@
       "destination": "catalog.verdicts.dlq",
       "destination_type": "queue",
       "routing_key": "catalog.verdicts",
+      "arguments": {}
+    },
+    {
+      "source": "users",
+      "vhost": "/",
+      "destination": "catalog.users",
+      "destination_type": "queue",
+      "routing_key": "user.#",
+      "arguments": {}
+    },
+    {
+      "source": "verdicts.dlx",
+      "vhost": "/",
+      "destination": "catalog.users.dlq",
+      "destination_type": "queue",
+      "routing_key": "catalog.users",
       "arguments": {}
     },
     {

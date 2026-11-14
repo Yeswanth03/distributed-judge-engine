@@ -15,6 +15,10 @@ public final class LeaderboardDtos {
             @Schema(description = "1 = best; users equal on score and on when they reached it share a rank", example = "1")
             int rank,
             @Schema(example = "user-42") String userId,
+            @Schema(description = "From the User Service's events; null until Catalog has heard about the user", example = "ada")
+            @Nullable String username,
+            @Schema(description = "May be empty; null until Catalog has heard about the user", example = "Ada L.")
+            @Nullable String displayName,
             @Schema(description = "Sum of the points of solved problems", example = "300") int score,
             @Schema(example = "3") int solvedCount) {}
 
@@ -23,11 +27,15 @@ public final class LeaderboardDtos {
             @Nullable Instant asOf,
             @Schema(description = "How long the newest verdict took from being judged to reaching the leaderboard", example = "0.4")
             @Nullable Double lagSeconds,
-            @Schema(description = "Users with at least one solve, best first") List<LeaderboardEntry> entries) {}
+            @Schema(description = "Users with at least one solve, best first; disabled accounts left out")
+            List<LeaderboardEntry> entries) {}
 
     public record UserStanding(
             @Schema(example = "user-42") String userId,
-            @Schema(description = "null until the user's first solve", example = "7") @Nullable Integer rank,
+            @Schema(example = "ada") @Nullable String username,
+            @Schema(example = "Ada L.") @Nullable String displayName,
+            @Schema(description = "null until the user's first solve, and for a disabled account", example = "7")
+            @Nullable Integer rank,
             @Schema(example = "300") int score,
             @Schema(example = "3") int solvedCount,
             @Schema(description = "Solved problems, in the order they were first solved") List<UUID> solvedProblemIds,
