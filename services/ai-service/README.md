@@ -76,6 +76,59 @@ clients are exercised.
    rows, plus `processing` rows that are older than the maximum generation time.
    Work saved before a crash is therefore finished after the restart.
 
+## Resilience
+
+Every call to a dependency goes through a **timeout**, **retries with exponential
+backoff and jitter**, and a **circuit breaker** (`app/resilience.py`).
+
+| Dependency | Breaker | Timeout |
+|---|---|---|
+| Ollama (`POST /api/generate`) | `ollama` | `AI_OLLAMA_TIMEOUT_SECONDS` (120 s) |
+| Submission Service | `submission` | `AI_HTTP_TIMEOUT_SECONDS` (5 s) |
+| Catalog | `catalog` | `AI_HTTP_TIMEOUT_SECONDS` (5 s) |
+
+Each dependency has its own breaker, so a Catalog outage never blocks calls to
+Ollama, and the other way round.
+
+**Circuit breaker states:**
+- **CLOSED:** calls go through, and the last 10 outcomes are remembered. Five
+  failures among them open the circuit.
+- **OPEN:** calls fail immediately with no network call, for 10 s.
+- **HALF-OPEN:** after the 10 s, one trial call goes through. If it succeeds, the
+  circuit closes and the old failures are forgotten. If it fails, the circuit opens
+  again with a fresh timer. Other callers keep failing fast during the trial.
+
+Only signs of an unhealthy dependency count as failures:
+- connection errors and timeouts;
+- HTTP 5xx and 429;
+- for Ollama, an empty or malformed response.
+
+A 404 for someone else's submission is the caller's problem, so it never opens a
+circuit.
+
+**Retries:** transient failures are retried up to `AI_GENERATION_ATTEMPTS` times.
+The waits double each time (about 1 s, then 2 s, then 4 s), capped at
+`AI_RETRY_MAX_SECONDS`, and each wait is randomised between half and the full
+value. The randomness stops many requests retrying at the same instant.
+
+**When a circuit is open:**
+- **`POST /submissions/{id}/feedback`:** when the Submission Service circuit is
+  open, it answers right away with `503` and a `Retry-After` header:
+
+  ```json
+  {"status": "circuit_open", "dependency": "submission", "retry_after": 7,
+   "message": "submission is temporarily unavailable"}
+  ```
+
+- **Background generation:** when the Ollama or Catalog circuit is open, the
+  request is **deferred**, not failed. It goes back to `queued`, and `error_reason`
+  says what it's waiting for. The sweep retries it once the circuit lets calls
+  through again. After `AI_MAX_DEFER_SECONDS` (30 min) it gives up and becomes
+  `unavailable`.
+- **`GET /health`:** reports each circuit's state. The status is `degraded` while
+  any circuit isn't closed. The endpoint still returns `200`, because the process
+  itself is alive.
+
 ## API
 
 The gateway authenticates the user and forwards a trusted `X-User-Id` header. This
@@ -86,7 +139,7 @@ service must only be reachable through it.
 | `POST` | `/submissions/{submission_id}/feedback` | `202` with a `queued`/`processing` request, or `200` if feedback is already `ready`. No body. |
 | `GET` | `/feedback-requests/{request_id}` | Status and feedback of one request |
 | `GET` | `/submissions/{submission_id}/feedback` | The latest request for the submission |
-| `GET` | `/health` | Liveness |
+| `GET` | `/health` | Liveness, plus each dependency's circuit state |
 
 `POST` works for any final verdict, `ACCEPTED` included. It reuses an existing
 `queued`, `processing` or `ready` request for the submission, including the
@@ -131,6 +184,11 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_GENERATION_WORKERS` | `2` | Concurrent generations |
 | `AI_GENERATION_ATTEMPTS` | `3` | Attempts per request on transient failures |
 | `AI_SWEEP_INTERVAL_SECONDS` | `30` | How often queued/stuck requests are resumed |
+| `AI_RETRY_BASE_SECONDS` / `AI_RETRY_MAX_SECONDS` | `1` / `8` | Exponential backoff: first wait and cap |
+| `AI_BREAKER_FAILURE_THRESHOLD` | `5` | Failures that open a circuit… |
+| `AI_BREAKER_WINDOW_SIZE` | `10` | …among this many most recent calls |
+| `AI_BREAKER_OPEN_SECONDS` | `10` | How long a circuit stays open before a trial call |
+| `AI_MAX_DEFER_SECONDS` | `1800` | A request waiting on an open circuit gives up after this |
 | `AI_API_HOST` / `AI_API_PORT` | `0.0.0.0` / `8084` | HTTP bind address |
 
 ## Open points with other teams

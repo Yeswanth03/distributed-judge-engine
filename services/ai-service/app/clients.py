@@ -13,6 +13,7 @@ import httpx
 
 from .config import settings
 from .models import normalize_verdict
+from .resilience import CircuitBreaker, breakers
 
 
 class ContextNotFound(Exception):
@@ -65,14 +66,19 @@ class SubmissionClient:
     submission to the user in X-User-Id (or an admin), so the AI service passes
     the user from the verdict event or the authenticated API caller."""
 
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(self, client: httpx.Client | None = None, breaker: CircuitBreaker | None = None) -> None:
         self._client = client or httpx.Client(
             base_url=settings.submission_base_url,
             timeout=settings.http_timeout_seconds,
             headers={"X-Service-Token": settings.internal_service_token},
         )
+        self.breaker = breaker or breakers["submission"]
 
     def get_submission(self, submission_id: str, user_id: str) -> SubmissionDetails:
+        """Raises CircuitOpenError without calling the service while its circuit is open."""
+        return self.breaker.call(lambda: self._get_submission(submission_id, user_id))
+
+    def _get_submission(self, submission_id: str, user_id: str) -> SubmissionDetails:
         resp = self._client.get(
             f"/api/v1/submissions/{submission_id}",
             params={"include": "code"},
@@ -101,11 +107,12 @@ class SubmissionClient:
 
 
 class CatalogClient:
-    def __init__(self, client: httpx.Client | None = None) -> None:
+    def __init__(self, client: httpx.Client | None = None, breaker: CircuitBreaker | None = None) -> None:
         self._client = client or httpx.Client(
             base_url=settings.catalog_base_url,
             timeout=settings.http_timeout_seconds,
         )
+        self.breaker = breaker or breakers["catalog"]
 
     def _slug_for(self, problem_id: str) -> str:
         """Catalog's public read is by slug, but submissions store the problem's UUID.
@@ -125,6 +132,11 @@ class CatalogClient:
                 raise ContextNotFound(f"problem {problem_id} is not a published Catalog problem")
 
     def get_problem(self, problem_ref: str, testset_version: int | None = None) -> ProblemDetails:
+        """One guarded call covering the slug lookup, problem read and test set read.
+        Raises CircuitOpenError without calling Catalog while its circuit is open."""
+        return self.breaker.call(lambda: self._get_problem(problem_ref, testset_version))
+
+    def _get_problem(self, problem_ref: str, testset_version: int | None = None) -> ProblemDetails:
         """problem_ref is the problem's UUID (what the Submission Service stores) or
         its slug. Statement from the public read, then the test cases from the
         judge-only endpoint. testset_version pins the exact version that was judged."""
