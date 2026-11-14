@@ -1,6 +1,9 @@
-# Local development stack. Services join as they are built.
-#   docker compose up -d
+# Local development stack: every service, behind the gateway.
+#   docker compose up -d --build
+#   Gateway (the only entry point): http://localhost:8000
 #   RabbitMQ UI: http://localhost:15672 (judge / judge)
+# The first start downloads the AI model (about 4.7 GB) into the ollama-models volume; until then AI feedback
+# waits. Ports already in use on your machine: override them in .env (POSTGRES_PORT, CATALOG_PORT, ...).
 services:
   postgres:
     image: postgres:16-alpine
@@ -85,6 +88,122 @@ services:
       timeout: 3s
       retries: 10
 
+  catalog:
+    build: ./services/catalog
+    environment:
+      # The local profile, pointed at this stack; it also seeds five sample problems on first start.
+      DB_URL: jdbc:postgresql://postgres:5432/catalog
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USER: judge
+      RABBITMQ_PASSWORD: judge
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-token}
+    ports:
+      # Set CATALOG_PORT in .env when you also run Catalog from the IDE on 8080.
+      - "${CATALOG_PORT:-8080}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  # Runs submissions in sandbox containers. It mounts the Docker socket, which is root-equivalent on the host:
+  # only the Spawner gets it, it has no route through the gateway, and sandboxes run with no network.
+  spawner:
+    build: ./services/spawner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${SPAWNER_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # The worker pool's minimum of 2. Scale with: docker compose up -d --scale judge-worker=N
+  # The metrics port (8083) isn't published: Prometheus reaches each replica over this network.
+  judge-worker:
+    build: ./services/judge-worker
+    deploy:
+      replicas: 2
+    environment:
+      JUDGE_RABBITMQ_URL: amqp://judge:judge@rabbitmq:5672/
+      JUDGE_CATALOG_BASE_URL: http://catalog:8080
+      JUDGE_SPAWNER_BASE_URL: http://spawner:8081
+      JUDGE_INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-token}
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      spawner:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8083/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  ai-service:
+    build: ./services/ai-service
+    environment:
+      AI_RABBITMQ_URL: amqp://judge:judge@rabbitmq:5672/
+      AI_SUBMISSION_BASE_URL: http://submission-service:8080
+      AI_CATALOG_BASE_URL: http://catalog:8080
+      AI_INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-token}
+      AI_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_feedback
+      # Defaults to the Ollama container below. For faster feedback on a Mac (GPU), run Ollama natively and set
+      # AI_OLLAMA_BASE_URL=http://host.docker.internal:11434 in .env.
+      AI_OLLAMA_BASE_URL: ${AI_OLLAMA_BASE_URL:-http://ollama:11434}
+      AI_OLLAMA_MODEL: ${AI_OLLAMA_MODEL:-qwen2.5-coder:7b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${AI_SERVICE_PORT:-8084}:8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Local model for the AI Service, capped so it can't starve the judge. Docker on a Mac has no GPU, so this is
+  # slower than native Ollama (see AI_OLLAMA_BASE_URL above).
+  ollama:
+    image: ollama/ollama:0.12.6
+    cpus: 4
+    mem_limit: 8g
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Downloads the model into the volume once (about 4.7 GB on first start), then exits.
+  ollama-pull:
+    image: ollama/ollama:0.12.6
+    entrypoint: ["ollama", "pull", "${AI_OLLAMA_MODEL:-qwen2.5-coder:7b}"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   # The only entry point from outside: verifies access tokens and routes to the services
   # (deploy/gateway/envoy.yaml). The services' own ports stay published for local debugging only.
   gateway:
@@ -102,3 +221,4 @@ services:
 
 volumes:
   postgres-data:
+  ollama-models:
