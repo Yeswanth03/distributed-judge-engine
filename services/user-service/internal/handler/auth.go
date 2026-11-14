@@ -31,7 +31,7 @@ type tokenResponse struct {
 	AccessToken      string    `json:"access_token"`
 	TokenType        string    `json:"token_type"`
 	ExpiresIn        int       `json:"expires_in"`
-	RefreshToken     string    `json:"refresh_token"`
+	RefreshToken     string    `json:"refresh_token,omitempty"` // absent when it travels in the cookie
 	RefreshExpiresIn int       `json:"refresh_expires_in"`
 	User             *userView `json:"user,omitempty"`
 }
@@ -134,7 +134,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.log.InfoContext(r.Context(), "user registered", "user_id", u.ID, "session_id", s.ID)
-	writeJSON(w, http.StatusCreated, resp)
+	h.writeTokens(w, r, http.StatusCreated, resp)
 }
 
 type loginRequest struct {
@@ -208,7 +208,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.log.InfoContext(r.Context(), "user logged in", "user_id", u.ID, "session_id", s.ID)
-	writeJSON(w, http.StatusOK, resp)
+	h.writeTokens(w, r, http.StatusOK, resp)
 }
 
 type refreshRequest struct {
@@ -222,8 +222,9 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.RefreshToken == "" {
-		WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "sign in again")
+	presented := refreshTokenOf(r, req)
+	if presented == "" {
+		h.rejectRefresh(w, r)
 		return
 	}
 	next, nextHash, err := token.NewRefreshToken()
@@ -231,14 +232,14 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, "make refresh token", err)
 		return
 	}
-	s, u, err := h.store.RotateRefreshToken(r.Context(), token.HashRefreshToken(req.RefreshToken), nextHash, h.now())
+	s, u, err := h.store.RotateRefreshToken(r.Context(), token.HashRefreshToken(presented), nextHash, h.now())
 	switch {
 	case errors.Is(err, repository.ErrRefreshTokenReused):
 		h.log.WarnContext(r.Context(), "refresh token reused, session revoked")
-		WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "sign in again")
+		h.rejectRefresh(w, r)
 		return
 	case errors.Is(err, repository.ErrInvalidRefreshToken), errors.Is(err, repository.ErrNotFound):
-		WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "sign in again")
+		h.rejectRefresh(w, r)
 		return
 	case err != nil:
 		h.internalError(w, r, "refresh", err)
@@ -249,7 +250,15 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, "issue token", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	h.writeTokens(w, r, http.StatusOK, resp)
+}
+
+// rejectRefresh answers a refresh that can't succeed, and clears a cookie that holds a dead token.
+func (h *Handler) rejectRefresh(w http.ResponseWriter, r *http.Request) {
+	if wantsCookie(r) {
+		h.clearRefreshCookie(w)
+	}
+	WriteError(w, http.StatusUnauthorized, "invalid_refresh_token", "sign in again")
 }
 
 // logout ends the session the refresh token belongs to. It always answers 204, even for an unknown token:
@@ -259,11 +268,14 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.RefreshToken != "" {
-		if _, err := h.store.RevokeSessionByToken(r.Context(), token.HashRefreshToken(req.RefreshToken), h.now()); err != nil {
+	if presented := refreshTokenOf(r, req); presented != "" {
+		if _, err := h.store.RevokeSessionByToken(r.Context(), token.HashRefreshToken(presented), h.now()); err != nil {
 			h.internalError(w, r, "logout", err)
 			return
 		}
+	}
+	if wantsCookie(r) {
+		h.clearRefreshCookie(w)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

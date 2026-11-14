@@ -179,7 +179,7 @@ func cors(origin string) middleware {
 			if r.Method == http.MethodOptions && r.Header.Get("Access-Control-Request-Method") != "" {
 				h.Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 				// X-User-* only matter without a gateway (local dev), where the frontend sends them itself.
-				h.Set("Access-Control-Allow-Headers", "Content-Type, X-User-Id, X-User-Role, X-Request-Id")
+				h.Set("Access-Control-Allow-Headers", "Content-Type, X-User-Id, X-User-Role, X-Request-Id, X-Token-Transport")
 				h.Set("Access-Control-Max-Age", "600")
 				w.WriteHeader(http.StatusNoContent)
 				return

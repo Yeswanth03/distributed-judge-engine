@@ -287,6 +287,13 @@ An access token can't be revoked: a role change, a disabled account or a signed-
 ### Refresh tokens and sessions
 The **refresh token** is opaque and long-lived (`SESSION_TTL`, default 30 days). Each one works **once**: `POST /auth/refresh` returns a new access token and a new refresh token. Presenting a refresh token that was already used means it was copied, so the whole session is revoked. Each new access token carries the user's current role.
 
+**Browsers get the refresh token as a cookie, never in the body.** A client that sends `X-Token-Transport: cookie` on `/auth/register`, `/auth/login`, `/auth/oauth/exchange`, `/auth/refresh` and `/auth/logout`:
+- gets the refresh token in a cookie `refresh_token` (`HttpOnly`, `SameSite=Strict`, `Path=/auth`, `Max-Age` = `refresh_expires_in`, `Secure` outside the local profile, see `REFRESH_COOKIE_SECURE`), and **no** `refresh_token` field in the JSON;
+- refreshes and signs out with an empty body `{}`: the token comes from the cookie;
+- has the cookie cleared when a refresh is refused and on logout.
+
+Without that header nothing changes: the token comes and goes in the JSON body (scripts, tests, curl). A cookie without the header is ignored. A proxy that serves these routes under another prefix rewrites the cookie path to match (the frontend serves them under `/api/auth`).
+
 ### HTTP API
 | Route | Who | Purpose |
 |---|---|---|
