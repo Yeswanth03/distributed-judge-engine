@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/model"
+	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/oauth"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/password"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/repository"
 )
@@ -55,19 +56,28 @@ type Options struct {
 	PasswordParams  password.Params
 	CORSOrigin      string
 	Readiness       []ReadinessCheck
-	Logger          *slog.Logger
+	// Providers enables sign-in with Google or GitHub, keyed by name; AllowedRedirects are the origins a
+	// sign-in may send the browser back to.
+	Providers        map[string]oauth.Provider
+	AllowedRedirects []string
+	Logger           *slog.Logger
 }
 
 type Handler struct {
 	store  Store
+	oauth  OAuthStore
 	tokens Tokens
 	opts   Options
 	log    *slog.Logger
 	now    func() time.Time
 }
 
-func New(store Store, tokens Tokens, opts Options) *Handler {
-	h := &Handler{store: store, tokens: tokens, opts: opts, log: opts.Logger, now: time.Now}
+// New wires the handlers. The repository serves as both stores.
+func New(store interface {
+	Store
+	OAuthStore
+}, tokens Tokens, opts Options) *Handler {
+	h := &Handler{store: store, oauth: store, tokens: tokens, opts: opts, log: opts.Logger, now: time.Now}
 	if h.log == nil {
 		h.log = slog.Default()
 	}
@@ -86,6 +96,10 @@ func (h *Handler) Routes(metrics http.Handler) http.Handler {
 	mux.HandleFunc("POST /auth/refresh", h.refresh)
 	mux.HandleFunc("POST /auth/logout", h.logout)
 	mux.HandleFunc("GET /.well-known/jwks.json", h.jwks)
+	mux.HandleFunc("GET /auth/oauth/providers", h.oauthProviders)
+	mux.HandleFunc("GET /auth/oauth/{provider}/start", h.oauthStart)
+	mux.HandleFunc("GET /auth/oauth/{provider}/callback", h.oauthCallback)
+	mux.HandleFunc("POST /auth/oauth/exchange", h.oauthExchange)
 	// Signed in: the gateway has verified the access token and set X-User-Id and X-User-Role.
 	mux.HandleFunc("GET /users/me", h.me)
 	mux.HandleFunc("PATCH /users/me", h.updateMe)
