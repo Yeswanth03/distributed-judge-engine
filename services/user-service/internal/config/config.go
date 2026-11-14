@@ -42,6 +42,16 @@ type Config struct {
 	OutboxMaxRetries   int
 	OutboxRetention    time.Duration
 
+	// Sign in with Google or GitHub. A provider is enabled when its client ID and secret are both set.
+	GoogleClientID     string
+	GoogleClientSecret string
+	GitHubClientID     string
+	GitHubClientSecret string
+	// The address browsers reach the gateway at; provider callbacks are PublicBaseURL + /auth/oauth/{provider}/callback.
+	PublicBaseURL string
+	// Origins a sign-in may send the browser back to (no open redirects).
+	OAuthAllowedRedirects []string
+
 	CORSOrigin      string
 	ShutdownTimeout time.Duration
 }
@@ -89,8 +99,18 @@ func Load() (Config, error) {
 		OutboxMaxRetries:   r.integer("OUTBOX_MAX_RETRIES", 10),
 		OutboxRetention:    r.duration("OUTBOX_RETENTION", 24*time.Hour),
 
+		GoogleClientID:        r.str("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:    r.fileOrValue("GOOGLE_CLIENT_SECRET"),
+		GitHubClientID:        r.str("GITHUB_CLIENT_ID", ""),
+		GitHubClientSecret:    r.fileOrValue("GITHUB_CLIENT_SECRET"),
+		PublicBaseURL:         strings.TrimRight(r.str("PUBLIC_BASE_URL", "http://localhost:8000"), "/"),
+		OAuthAllowedRedirects: r.list("OAUTH_ALLOWED_REDIRECTS", "http://localhost:5500,http://localhost:8000"),
+
 		CORSOrigin:      r.str("CORS_ORIGIN", ""),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT", 15*time.Second),
+	}
+	if (c.GoogleClientID == "") != (c.GoogleClientSecret == "") || (c.GitHubClientID == "") != (c.GitHubClientSecret == "") {
+		r.errs = append(r.errs, "a provider's client ID and secret go together (GOOGLE_* and GITHUB_*)")
 	}
 	if !local && c.SigningKeyPEM == "" {
 		r.errs = append(r.errs, "JWT_PRIVATE_KEY (or JWT_PRIVATE_KEY_FILE) is required outside the local profile")
@@ -170,6 +190,16 @@ func (r *reader) duration(key string, def time.Duration) time.Duration {
 		r.errs = append(r.errs, fmt.Sprintf("%s: %q is not a positive duration like 10m or 720h", key, v))
 	}
 	return d
+}
+
+func (r *reader) list(key, def string) []string {
+	var out []string
+	for _, part := range strings.Split(r.str(key, def), ",") {
+		if p := strings.TrimRight(strings.TrimSpace(part), "/"); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // splitPEM splits concatenated PEM blocks into one string each.

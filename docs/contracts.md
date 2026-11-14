@@ -302,6 +302,19 @@ The **refresh token** is opaque and long-lived (`SESSION_TTL`, default 30 days).
 
 Token responses: `{access_token, token_type: "Bearer", expires_in, refresh_token, refresh_expires_in, user?}`.
 
+### Sign in with Google or GitHub
+The authorization code flow with PKCE, run on the server: client secrets never reach a browser, and tokens never travel in a URL.
+
+1. The page sends the browser to `GET /auth/oauth/{google|github}/start?redirect_uri=<page>`. `<page>`'s origin must be in `OAUTH_ALLOWED_REDIRECTS`, otherwise `400`. `GET /auth/oauth/providers` lists the enabled providers.
+2. The provider sends the browser back to `/auth/oauth/{provider}/callback`. The User Service checks the single-use `state` (10 minutes), exchanges the code with its PKCE verifier and reads the account.
+3. The browser lands on `<page>?login_code=...` (single use, 1 minute), or `<page>?login_error=...` with one of `cancelled`, `provider_error`, `email_not_verified`, `email_in_use`, `account_disabled`.
+4. The page calls `POST /auth/oauth/exchange` `{login_code}` and gets the usual token response.
+
+Which account signs in:
+- the account already linked to that Google or GitHub account;
+- else the account with the same email, **only if** the provider verified it **and** the account's email is verified too (it was created through a provider). A password account is never linked by email: its email isn't verified, so anyone could take it over by signing up at a provider with that address. That case answers `email_in_use`: sign in with the password instead;
+- else a new account with no password, `email_verified: true`, and a username taken from the provider (with a numeric suffix if taken).
+
 ### Events: User Service → `users` exchange
 A topic exchange; the routing key is the event type. Published through an outbox, at least once.
 

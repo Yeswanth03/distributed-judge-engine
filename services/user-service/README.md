@@ -24,6 +24,7 @@ changes ──► users table + outbox_events (one transaction) ──► relay 
 | Stolen refresh token | Each refresh token works once; a reused one revokes the whole session | [sessions.go](internal/repository/sessions.go) |
 | Availability | The gateway verifies tokens on its own, so this service is never on another request's critical path | [token](internal/token/token.go) |
 | Key rotation | Keys are identified by thumbprint (`kid`); old public keys stay in the JWKS until their tokens expire | [token](internal/token/token.go) |
+| Google / GitHub | Authorization code flow with PKCE on the server; single-use state and login codes; never links a password account by email | [oauth](internal/oauth/oauth.go), [oauth.go](internal/handler/oauth.go) |
 | Events | Transactional outbox, publisher confirms, a `version` per user so consumers can drop stale events | [outbox](internal/outbox/relay.go) |
 
 ## Run it
@@ -59,6 +60,10 @@ curl localhost:8085/users/me -H "X-User-Id: <sub from the access token>"
 | `SESSION_TTL` | `720h` (30 days) | Refresh token lifetime |
 | `LOGIN_MAX_FAILURES`, `LOGIN_LOCKOUT` | `5`, `15m` | |
 | `BOOTSTRAP_ADMIN_EMAIL`, `_USERNAME`, `_PASSWORD` | none | First admin, created only while there is no admin |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | none | Sign in with Google; enabled when both are set. Callback: `PUBLIC_BASE_URL/auth/oauth/google/callback` |
+| `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | none | Sign in with GitHub; same rule. Callback: `PUBLIC_BASE_URL/auth/oauth/github/callback` |
+| `PUBLIC_BASE_URL` | `http://localhost:8000` | Where browsers reach the gateway |
+| `OAUTH_ALLOWED_REDIRECTS` | `http://localhost:5500,http://localhost:8000` | Origins a sign-in may return to |
 | `CORS_ORIGIN` | empty | |
 | `OUTBOX_*`, `SHUTDOWN_TIMEOUT`, `HTTP_ADDR`, `LOG_LEVEL` | as in the Submission Service | |
 

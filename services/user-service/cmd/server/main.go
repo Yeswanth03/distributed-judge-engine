@@ -24,6 +24,7 @@ import (
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/config"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/handler"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/model"
+	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/oauth"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/outbox"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/password"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/repository"
@@ -107,7 +108,9 @@ func run(cfg config.Config, log *slog.Logger) error {
 			{Name: "database", Check: repo.Ping},
 			{Name: "broker", Check: mq.Check},
 		},
-		Logger: log,
+		Providers:        providers(cfg, log),
+		AllowedRedirects: cfg.OAuthAllowedRedirects,
+		Logger:           log,
 	})
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -224,6 +227,22 @@ func bootstrapAdmin(ctx context.Context, cfg config.Config, repo *repository.Rep
 	return err
 }
 
+// providers enables each sign-in provider whose client ID and secret are configured.
+func providers(cfg config.Config, log *slog.Logger) map[string]oauth.Provider {
+	out := map[string]oauth.Provider{}
+	callback := func(name string) string { return cfg.PublicBaseURL + "/auth/oauth/" + name + "/callback" }
+	if cfg.GoogleClientID != "" {
+		out["google"] = oauth.NewGoogle(cfg.GoogleClientID, cfg.GoogleClientSecret, callback("google"), oauth.GoogleEndpoints)
+	}
+	if cfg.GitHubClientID != "" {
+		out["github"] = oauth.NewGitHub(cfg.GitHubClientID, cfg.GitHubClientSecret, callback("github"), oauth.GitHubEndpoints)
+	}
+	for name := range out {
+		log.Info("sign-in provider enabled", "provider", name, "callback", callback(name))
+	}
+	return out
+}
+
 // sessionJanitor deletes sessions that expired or were revoked more than a week ago, with their tokens.
 func sessionJanitor(ctx context.Context, repo *repository.Repository, log *slog.Logger) {
 	t := time.NewTicker(time.Hour)
@@ -238,6 +257,9 @@ func sessionJanitor(ctx context.Context, repo *repository.Repository, log *slog.
 				log.Error("deleting dead sessions failed", "error", err)
 			} else if n > 0 {
 				log.Info("deleted dead sessions", "count", n)
+			}
+			if _, err := repo.DeleteExpiredSignIns(ctx, time.Now()); err != nil {
+				log.Error("deleting expired sign-ins failed", "error", err)
 			}
 		}
 	}

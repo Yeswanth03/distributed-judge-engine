@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/model"
+	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/oauth"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/password"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/repository"
 	"github.com/Yeswanth03/distributed-judge-engine/services/user-service/internal/token"
@@ -28,9 +29,10 @@ import (
 // docker-compose one) and a real token issuer: the parts most worth testing here are the database rules.
 
 type testServer struct {
-	h      http.Handler
-	repo   *repository.Repository
-	issuer *token.Issuer
+	h         http.Handler
+	repo      *repository.Repository
+	issuer    *token.Issuer
+	providers map[string]*fakeProvider
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -71,12 +73,15 @@ func newTestServer(t *testing.T) *testServer {
 	if err != nil {
 		t.Fatal(err)
 	}
+	fakes := map[string]*fakeProvider{"google": newFakeProvider("google"), "github": newFakeProvider("github")}
 	h := New(repo, issuer, Options{
 		SessionTTL: time.Hour, MaxFailedLogins: 3, LoginLockout: 15 * time.Minute,
-		PasswordParams: password.Params{MemoryKiB: 64, Iterations: 1, Threads: 1}, // fast hashes for tests
-		Logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		PasswordParams:   password.Params{MemoryKiB: 64, Iterations: 1, Threads: 1}, // fast hashes for tests
+		Providers:        map[string]oauth.Provider{"google": fakes["google"], "github": fakes["github"]},
+		AllowedRedirects: []string{"http://localhost:5500"},
+		Logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
-	return &testServer{h: h.Routes(nil), repo: repo, issuer: issuer}
+	return &testServer{h: h.Routes(nil), repo: repo, issuer: issuer, providers: fakes}
 }
 
 // identity is what the gateway would forward after verifying an access token.
