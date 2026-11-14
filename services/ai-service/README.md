@@ -127,7 +127,7 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `AI_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Installed local model name |
 | `AI_OLLAMA_TIMEOUT_SECONDS` | `120` | Ollama request timeout |
-| `AI_PROMPT_VERSION` | `2` | Prompt version stored with each response |
+| `AI_PROMPT_VERSION` | `3` | Prompt version stored with each response |
 | `AI_GENERATION_WORKERS` | `2` | Concurrent generations |
 | `AI_GENERATION_ATTEMPTS` | `3` | Attempts per request on transient failures |
 | `AI_SWEEP_INTERVAL_SECONDS` | `30` | How often queued/stuck requests are resumed |

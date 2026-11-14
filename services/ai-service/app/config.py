@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # 3/3 runs, where llama3.2 gave wrong advice in every run. About 4.7 GB.
     ollama_model: str = "qwen2.5-coder:7b"
     ollama_timeout_seconds: float = 120.0
-    prompt_version: str = "2"
+    prompt_version: str = "3"
 
     # Background generation: worker threads, attempts per request for transient
     # failures, and how often queued/stuck requests are picked up again.
