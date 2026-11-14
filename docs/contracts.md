@@ -21,6 +21,8 @@ Declared once in [deploy/rabbitmq/definitions.json](../deploy/rabbitmq/definitio
 | `catalog.verdicts` | classic queue, bound to `verdicts` on `verdict.#` | Catalog updates solves and the leaderboard. |
 | `submission-service.verdict.dlq`, `jobs.dlq` + `dead-letter` exchange | | Rejected or over-delivered messages, for inspection. |
 | `catalog.verdicts.dlq` + `verdicts.dlx` exchange | | The same for Catalog. |
+| `catalog.users` | classic queue, bound to `users` on `user.#` | Catalog keeps each user's name and status for the leaderboard (section 7). |
+| `catalog.users.dlq` | via `verdicts.dlx` | Malformed user events, for inspection. |
 | `runs.queue` | quorum queue, `x-delivery-limit: 3` | Trial runs for the Judge Worker (section 6). Separate from `jobs.queue`, so a worker that predates runs can never score one. |
 | `submission-service.run-results.queue` | quorum queue, `x-delivery-limit: 5` | Run results, sent by the worker through the default exchange. Never on `verdicts`, so runs reach neither Catalog nor the AI Service. |
 | `runs.dlq`, `submission-service.run-results.dlq` | quorum queues, via `dead-letter` | The same for runs. |
@@ -337,3 +339,4 @@ A topic exchange; the routing key is the event type. Published through an outbox
 - `version` rises with every change. Keep the highest version seen per `user_id` and ignore anything older: that makes duplicates and out-of-order deliveries harmless.
 - Events never carry the email address or anything about credentials.
 - Consumers declare and bind their own queue (for example `catalog.users` on `user.#`).
+- **Catalog** consumes them on `catalog.users`, which is also declared in `deploy/rabbitmq/definitions.json` so no event is lost while Catalog is down. It stores `username`, `display_name` and `status` (highest `version` wins) and returns `username` and `display_name` on leaderboard entries and standings. Disabled accounts are left out of the leaderboard; their scores are kept. A user registered before the queue existed has `null` names until their next change.

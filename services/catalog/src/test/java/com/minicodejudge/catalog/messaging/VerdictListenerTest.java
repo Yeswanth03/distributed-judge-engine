@@ -46,7 +46,7 @@ class VerdictListenerTest {
 
     @BeforeEach
     void seedProblem() {
-        jdbc.sql("TRUNCATE results, user_problem_status, user_scores, test_cases, testsets, problems").update();
+        jdbc.sql("TRUNCATE results, user_problem_status, user_scores, user_profiles, test_cases, testsets, problems").update();
         problemId = UUID.randomUUID();
         jdbc.sql("""
                 INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb, status)
@@ -82,7 +82,48 @@ class VerdictListenerTest {
         assertThat(jdbc.sql("SELECT count(*) FROM results").query(Integer.class).single()).isZero();
     }
 
+    @Test
+    void userEventsKeepTheNewestVersionWhateverTheDeliveryOrder() {
+        publishTo(RabbitConfig.USER_EXCHANGE, "user.updated", userEvent(3, "Ada L.", "active"));
+        publishTo(RabbitConfig.USER_EXCHANGE, "user.registered", userEvent(1, "", "active")); // late and older
+        publishTo(RabbitConfig.USER_EXCHANGE, "user.updated", userEvent(3, "Ada L.", "active")); // duplicate
+
+        waitUntil(() -> "Ada L.".equals(displayNameOf("alice-id")));
+        publishTo(RabbitConfig.USER_EXCHANGE, "user.status_changed", userEvent(4, "Ada L.", "disabled"));
+        waitUntil(() -> "disabled".equals(jdbc.sql("SELECT status FROM user_profiles").query(String.class).optional().orElse("")));
+        assertThat(jdbc.sql("SELECT version FROM user_profiles").query(Long.class).single()).isEqualTo(4);
+    }
+
+    @Test
+    void malformedUserEventIsDeadLettered() {
+        publishTo(RabbitConfig.USER_EXCHANGE, "user.updated", "{\"user_id\":\"alice-id\",\"version\":1}");
+
+        Message dead = rabbitTemplate.receive(RabbitConfig.USER_DEAD_LETTER_QUEUE, Duration.ofSeconds(20).toMillis());
+
+        assertThat(dead).isNotNull();
+        assertThat(jdbc.sql("SELECT count(*) FROM user_profiles").query(Integer.class).single()).isZero();
+    }
+
     // ---- helpers ----
+
+    private static String userEvent(long version, String displayName, String status) {
+        return """
+                {"event_id":"%s","type":"user.updated","user_id":"alice-id","username":"ada","display_name":"%s",
+                 "role":"user","status":"%s","version":%d,"occurred_at":"2026-11-14T10:00:00Z"}
+                """.formatted(UUID.randomUUID(), displayName, status, version);
+    }
+
+    private String displayNameOf(String userId) {
+        return jdbc.sql("SELECT display_name FROM user_profiles WHERE user_id = :u").param("u", userId)
+                .query(String.class).optional().orElse(null);
+    }
+
+    private void publishTo(String exchange, String routingKey, String json) {
+        MessageProperties props = new MessageProperties();
+        props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
+        rabbitTemplate.send(exchange, routingKey,
+                MessageBuilder.withBody(json.getBytes(StandardCharsets.UTF_8)).andProperties(props).build());
+    }
 
     private void publish(String routingKey, String json) {
         MessageProperties props = new MessageProperties();
