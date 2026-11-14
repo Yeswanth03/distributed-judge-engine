@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import httpx
 
 from .config import settings
+from .resilience import CircuitBreaker, breakers
 from .schemas import FeedbackContext
 
 SYSTEM_PROMPT = (
@@ -95,7 +96,14 @@ def build_prompt(context: FeedbackContext) -> str:
 
 
 class OllamaClient:
+    def __init__(self, breaker: CircuitBreaker | None = None) -> None:
+        self.breaker = breaker or breakers["ollama"]
+
     def generate_feedback(self, context: FeedbackContext) -> GeneratedFeedback:
+        """Raises CircuitOpenError without calling Ollama while its circuit is open."""
+        return self.breaker.call(lambda: self._generate(context))
+
+    def _generate(self, context: FeedbackContext) -> GeneratedFeedback:
         response = httpx.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
             json={

@@ -33,6 +33,19 @@ class Settings(BaseSettings):
     generation_attempts: int = 3
     sweep_interval_seconds: int = 30
 
+    # Retry backoff: waits grow 1 s, 2 s, 4 s... (with jitter), never above the cap.
+    retry_base_seconds: float = 1.0
+    retry_max_seconds: float = 8.0
+
+    # Circuit breaker per dependency (Ollama, Submission, Catalog): this many
+    # failures among the last `window_size` calls opens it; after `open_seconds`
+    # one trial call is allowed through.
+    breaker_failure_threshold: int = 5
+    breaker_window_size: int = 10
+    breaker_open_seconds: float = 10.0
+    # A request waiting on an open circuit gives up (unavailable) after this long.
+    max_defer_seconds: int = 1800
+
     database_url: str = "postgresql://postgres:postgres@localhost:5432/ai_feedback"
     api_host: str = "0.0.0.0"
     api_port: int = 8084
