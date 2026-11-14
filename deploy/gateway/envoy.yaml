@@ -1,0 +1,241 @@
+# The gateway: the only way into the system from outside (docs/contracts.md section 7).
+#
+# For every request it
+#   1. removes any X-User-Id, X-User-Role or X-Session-Id the client sent (they would be forged),
+#   2. verifies the access token with the User Service's public keys, cached locally: no request ever calls the
+#      User Service to be authorised, so an outage there doesn't stop signed-in users,
+#   3. sets those headers from the token's claims, and
+#   4. routes to the owning service. /internal/* is never routed.
+
+admin:
+  # Stats and config dump, reachable only from inside the container.
+  address:
+    socket_address: { address: 127.0.0.1, port_value: 9901 }
+
+# A cap on open client connections, so a flood can't exhaust the gateway's memory.
+overload_manager:
+  resource_monitors:
+    - name: envoy.resource_monitors.global_downstream_max_connections
+      typed_config:
+        "@type": type.googleapis.com/envoy.extensions.resource_monitors.downstream_connections.v3.DownstreamConnectionsConfig
+        max_active_downstream_connections: 10000
+
+static_resources:
+  listeners:
+    - name: public
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 8000 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: gateway
+                # The gateway is the edge: it records the real client address in X-Forwarded-For (as the last
+                # entry) and trusts no X-Forwarded-For a client sends.
+                use_remote_address: true
+                xff_num_trusted_hops: 0
+                # Every request gets an X-Request-Id the services log, so one request can be followed end to end.
+                generate_request_id: true
+                # Live updates (SSE) send a ping every 15 s, well inside this.
+                stream_idle_timeout: 300s
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          time: "%START_TIME%"
+                          method: "%REQ(:METHOD)%"
+                          path: "%REQ(X-ENVOY-ORIGINAL-PATH?:PATH)%"
+                          status: "%RESPONSE_CODE%"
+                          flags: "%RESPONSE_FLAGS%"
+                          duration_ms: "%DURATION%"
+                          upstream: "%UPSTREAM_CLUSTER%"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+                          user_id: "%REQ(X-USER-ID)%"
+                # Errors the gateway makes itself use the same body as every service: {"error", "message"}.
+                local_reply_config:
+                  mappers:
+                    - filter:
+                        status_code_filter:
+                          comparison: { op: EQ, value: { default_value: 401, runtime_key: gateway.reply_401 } }
+                      body_format_override:
+                        json_format: { error: unauthorized, message: "missing, invalid or expired access token" }
+                    - filter:
+                        status_code_filter:
+                          comparison: { op: EQ, value: { default_value: 403, runtime_key: gateway.reply_403 } }
+                      body_format_override:
+                        json_format: { error: forbidden, message: "this access token is not accepted here" }
+                    - filter:
+                        status_code_filter:
+                          comparison: { op: EQ, value: { default_value: 429, runtime_key: gateway.reply_429 } }
+                      body_format_override:
+                        json_format: { error: too_many_requests, message: "too many requests, please wait and try again" }
+                    - filter:
+                        status_code_filter:
+                          comparison: { op: EQ, value: { default_value: 503, runtime_key: gateway.reply_503 } }
+                      body_format_override:
+                        json_format: { error: unavailable, message: "the service is unavailable, please retry" }
+                route_config:
+                  name: judge
+                  virtual_hosts:
+                    - name: judge
+                      domains: ["*"]
+                      routes:
+                        - match: { path: /gateway/healthz }
+                          direct_response:
+                            status: 200
+                            body: { inline_string: '{"status":"ok"}' }
+
+                        # Service-to-service only (Catalog's test sets, for the Judge Worker).
+                        - match: { prefix: /internal/ }
+                          direct_response:
+                            status: 404
+                            body: { inline_string: '{"error":"not_found","message":"no such route"}' }
+
+                        # User Service. /auth/* is public and rate limited per client address.
+                        - match: { prefix: /auth/ }
+                          route: { cluster: user_service, timeout: 15s }
+                          typed_per_filter_config:
+                            envoy.filters.http.local_ratelimit:
+                              "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                              stat_prefix: auth_rate_limit
+                              # Per gateway instance, per client address: 20 requests a minute. The User Service
+                              # also locks an account after repeated wrong passwords, whatever the address.
+                              token_bucket: { max_tokens: 1000, tokens_per_fill: 1000, fill_interval: 60s }
+                              descriptors:
+                                - entries: [{ key: remote_address }]
+                                  token_bucket: { max_tokens: 20, tokens_per_fill: 20, fill_interval: 60s }
+                              max_dynamic_descriptors: 10000
+                              rate_limits: [{ actions: [{ remote_address: {} }] }]
+                              filter_enabled:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                                runtime_key: auth_rate_limit_enabled
+                              filter_enforced:
+                                default_value: { numerator: 100, denominator: HUNDRED }
+                                runtime_key: auth_rate_limit_enforced
+                        - match: { path: /.well-known/jwks.json }
+                          route: { cluster: user_service, timeout: 5s }
+                        - match: { prefix: /users }
+                          route: { cluster: user_service, timeout: 15s }
+
+                        # Submission Service. The live-update stream stays open until the verdict, so no timeout.
+                        - match: { safe_regex: { regex: "^/api/v1/submissions/[^/]+/events$" } }
+                          route: { cluster: submission_service, timeout: 0s }
+                        - match: { prefix: /api/v1/submissions }
+                          route: { cluster: submission_service, timeout: 15s }
+                        - match: { prefix: /api/v1/runs }
+                          route: { cluster: submission_service, timeout: 15s }
+
+                        # AI Service, mounted under /api/v1/ai/ (its own routes start at /).
+                        - match: { prefix: /api/v1/ai/ }
+                          route: { cluster: ai_service, timeout: 15s, prefix_rewrite: / }
+
+                        # Catalog.
+                        - match: { prefix: /problems }
+                          route: { cluster: catalog, timeout: 15s }
+                        - match: { prefix: /leaderboard }
+                          route: { cluster: catalog, timeout: 15s }
+                        - match: { prefix: /admin/ }
+                          route: { cluster: catalog, timeout: 15s }
+
+                        - match: { prefix: / }
+                          direct_response:
+                            status: 404
+                            body: { inline_string: '{"error":"not_found","message":"no such route"}' }
+
+                http_filters:
+                  # 1. Forged identity headers go first, before anything can read them.
+                  - name: envoy.filters.http.header_mutation
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.header_mutation.v3.HeaderMutation
+                      mutations:
+                        request_mutations:
+                          - remove: x-user-id
+                          - remove: x-user-role
+                          - remove: x-session-id
+
+                  # 2. Verify the access token and set the identity headers from it.
+                  - name: envoy.filters.http.jwt_authn
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.jwt_authn.v3.JwtAuthentication
+                      # Browsers send CORS preflights without credentials; the services answer them.
+                      bypass_cors_preflight: true
+                      providers:
+                        user_service:
+                          issuer: judge-engine-user-service
+                          audiences: [judge-engine]
+                          remote_jwks:
+                            http_uri:
+                              uri: http://user-service:8080/.well-known/jwks.json
+                              cluster: user_service
+                              timeout: 5s
+                            # Keys are cached and refetched every 5 minutes; a rotated key stays published far
+                            # longer than that, so no valid token is ever refused because of the cache.
+                            cache_duration: 300s
+                            async_fetch: {}
+                            retry_policy:
+                              num_retries: 5
+                              retry_back_off: { base_interval: 0.5s, max_interval: 10s }
+                          # The services need the identity, not the token itself.
+                          forward: false
+                          claim_to_headers:
+                            - { header_name: x-user-id, claim_name: sub }
+                            - { header_name: x-user-role, claim_name: role }
+                            - { header_name: x-session-id, claim_name: sid }
+                      rules:
+                        # No token needed. A rule without "requires" verifies nothing.
+                        - match: { prefix: /auth/ }
+                        - match: { path: /.well-known/jwks.json }
+                        - match: { path: /gateway/healthz }
+                        # Never routed: answered 404 by the route table, so there is nothing to authorise.
+                        - match: { prefix: /internal/ }
+                        # Public reads: a token is optional, but if one is sent it must be valid.
+                        - match: { prefix: /problems, headers: [{ name: ":method", string_match: { exact: GET } }] }
+                          requires:
+                            requires_any:
+                              requirements: [{ provider_name: user_service }, { allow_missing: {} }]
+                        - match: { prefix: /leaderboard, headers: [{ name: ":method", string_match: { exact: GET } }] }
+                          requires:
+                            requires_any:
+                              requirements: [{ provider_name: user_service }, { allow_missing: {} }]
+                        # Everything else needs a valid token.
+                        - match: { prefix: / }
+                          requires: { provider_name: user_service }
+
+                  # 3. Rate limits, enabled per route (only /auth/* for now).
+                  - name: envoy.filters.http.local_ratelimit
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.local_ratelimit.v3.LocalRateLimit
+                      stat_prefix: http_local_rate_limiter
+
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+  clusters:
+    - name: user_service
+      type: STRICT_DNS
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: user_service
+        endpoints: [{ lb_endpoints: [{ endpoint: { address: { socket_address: { address: user-service, port_value: 8080 } } } }] }]
+    - name: submission_service
+      type: STRICT_DNS
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: submission_service
+        endpoints: [{ lb_endpoints: [{ endpoint: { address: { socket_address: { address: submission-service, port_value: 8080 } } } }] }]
+    - name: catalog
+      type: STRICT_DNS
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: catalog
+        endpoints: [{ lb_endpoints: [{ endpoint: { address: { socket_address: { address: catalog, port_value: 8080 } } } }] }]
+    - name: ai_service
+      type: STRICT_DNS
+      connect_timeout: 2s
+      load_assignment:
+        cluster_name: ai_service
+        endpoints: [{ lb_endpoints: [{ endpoint: { address: { socket_address: { address: ai-service, port_value: 8084 } } } }] }]

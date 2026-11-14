@@ -79,5 +79,20 @@ services:
       timeout: 3s
       retries: 10
 
+  # The only entry point from outside: verifies access tokens and routes to the services
+  # (deploy/gateway/envoy.yaml). The services' own ports stay published for local debugging only.
+  gateway:
+    image: envoyproxy/envoy:v1.39.6
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    volumes:
+      - ./deploy/gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - "${GATEWAY_PORT:-8000}:8000"
+    depends_on:
+      user-service:
+        condition: service_healthy
+      submission-service:
+        condition: service_healthy
+
 volumes:
   postgres-data:

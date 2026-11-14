@@ -277,7 +277,10 @@ Login returns a short-lived **access token**: a JWT signed with **ES256**. The g
 The gateway must:
 - reject a request with an invalid or expired token (`401`), except on public routes (`/auth/*`, `/.well-known/jwks.json`, public Catalog reads);
 - **remove** any `X-User-Id`, `X-User-Role` and `X-Session-Id` the client sent, then set them from `sub`, `role` and `sid`;
-- never route `/internal/*`.
+- never route `/internal/*`;
+- append the client address it saw as the **last** `X-Forwarded-For` entry. Services read the last entry, never the first, which the client controls.
+
+The gateway is Envoy, configured in [deploy/gateway/envoy.yaml](../deploy/gateway/envoy.yaml); its route map is in [deploy/gateway/README.md](../deploy/gateway/README.md).
 
 An access token can't be revoked: a role change, a disabled account or a signed-out session takes effect within `ACCESS_TOKEN_TTL` at the latest.
 
