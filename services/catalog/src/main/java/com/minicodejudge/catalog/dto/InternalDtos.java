@@ -1,8 +1,10 @@
 package com.minicodejudge.catalog.dto;
 
+import com.minicodejudge.catalog.dto.ProblemDtos.FunctionParameter;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.UUID;
+import org.jspecify.annotations.Nullable;
 
 /** Shapes for /internal/** (judge workers only). JSON field names are snake_case (see application.properties). */
 public final class InternalDtos {
@@ -12,8 +14,9 @@ public final class InternalDtos {
     /** One case as the judge runs it. Hidden cases are included; this is the only route that returns them. */
     public record InternalCase(
             @Schema(description = "Judging order, starting at 1", example = "1") int ordinal,
-            @Schema(example = "2 7 11 15\n9") String input,
-            @Schema(example = "0 1") String expectedOutput,
+            @Schema(description = "JSON object of the function's arguments", example = "{\"nums\":[2,7,11,15],\"target\":9}")
+            String input,
+            @Schema(description = "JSON value the function must return", example = "[0,1]") String expectedOutput,
             @Schema(description = "true if users can see this case; lets hints mention a sample without revealing hidden ones")
             boolean isSample) {}
 
@@ -27,5 +30,10 @@ public final class InternalDtos {
             int timeLimitMs,
             @Schema(description = "Memory limit; fixed once the problem is published", example = "256")
             int memoryLimitMb,
+            @Schema(description = "Method of class Solution to call; null only for a problem without function details",
+                    example = "twoSum")
+            @Nullable String functionName,
+            @Schema(description = "The function's arguments, in order") @Nullable List<FunctionParameter> parameters,
+            @Schema(example = "int[]") @Nullable String returnType,
             @Schema(description = "All cases, hidden and sample, in judging order") List<InternalCase> cases) {}
 }

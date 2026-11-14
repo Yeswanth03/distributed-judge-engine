@@ -5,6 +5,7 @@ from .catalog_client import CatalogClient
 from .config import settings
 from .health_server import JOBS_PROCESSED, start_in_background
 from .judge import judge_submission
+from .run import run_code
 from .spawner_client import SpawnerClient
 
 logging.basicConfig(level=logging.INFO)
@@ -20,7 +21,10 @@ def main():
         JOBS_PROCESSED.labels(status=verdict.verdict).inc()
         return verdict
 
-    consume_forever(judge_fn)
+    def run_fn(job):
+        return run_code(job, catalog, spawner)
+
+    consume_forever(judge_fn, run_fn)
 
 
 if __name__ == "__main__":

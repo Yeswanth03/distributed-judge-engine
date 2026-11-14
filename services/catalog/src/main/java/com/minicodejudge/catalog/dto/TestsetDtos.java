@@ -19,13 +19,13 @@ public final class TestsetDtos {
     private TestsetDtos() {}
 
     /**
-     * One test case. Input and expected output may be empty (a program can print nothing) but not missing.
+     * One test case, as JSON text: input holds the function's arguments, expected_output its return value.
      * is_sample defaults to false: a case is hidden unless marked otherwise, so forgetting the flag never exposes it.
      */
     public record CaseRequest(
-            @Schema(description = "Exactly what the program reads on stdin; may be empty", example = "2 7 11 15\n9")
+            @Schema(description = "JSON object with one value per parameter", example = "{\"nums\":[2,7,11,15],\"target\":9}")
             @NotNull @Size(max = MAX_CASE_FIELD_CHARS) String input,
-            @Schema(description = "Exactly what the program must print; may be empty", example = "0 1")
+            @Schema(description = "JSON value of the problem's return_type", example = "[0,1]")
             @NotNull @Size(max = MAX_CASE_FIELD_CHARS) String expectedOutput,
             // No defaultValue here: Swagger UI prefers it over the example, which would make the example body
             // all-hidden and fail the "at least one sample" rule. The default is stated in the description instead.

@@ -3,14 +3,20 @@ package com.minicodejudge.catalog.repository;
 import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemSummary;
 import com.minicodejudge.catalog.dto.AdminDtos.AdminProblemView;
 import com.minicodejudge.catalog.dto.ProblemDtos.CreateProblemRequest;
+import com.minicodejudge.catalog.dto.ProblemDtos.FunctionDetails;
+import com.minicodejudge.catalog.dto.ProblemDtos.FunctionParameter;
 import com.minicodejudge.catalog.dto.ProblemDtos.ProblemSummary;
 import com.minicodejudge.catalog.dto.ProblemDtos.UpdateProblemRequest;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.json.JsonMapper;
 
 /** SQL for the problems table. No rules live here. */
 @Repository
@@ -18,21 +24,39 @@ public class ProblemRepository {
 
     /**
      * The columns the write rules look at: status and current version, plus the fields that lock once a problem
-     * is published. currentVersion is null until the first publish.
+     * is published. currentVersion is null until the first publish; function is null only on problems from before
+     * function details existed.
      */
     public record LockedFields(
-            String status, Integer currentVersion, String difficulty, int points, int timeLimitMs, int memoryLimitMb) {}
+            String status, @Nullable Integer currentVersion, String difficulty, int points, int timeLimitMs,
+            int memoryLimitMb, @Nullable FunctionDetails function) {}
+
+    private static final TypeReference<List<FunctionParameter>> PARAMETER_LIST = new TypeReference<>() {};
 
     private final JdbcClient jdbc;
+    private final JsonMapper json;
 
-    public ProblemRepository(JdbcClient jdbc) {
+    public ProblemRepository(JdbcClient jdbc, JsonMapper json) {
         this.jdbc = jdbc;
+        this.json = json;
+    }
+
+    /** Reads function_name, parameters, return_type and starter_code; the constraint in V4 sets them all or none. */
+    private @Nullable FunctionDetails functionDetails(ResultSet rs) throws SQLException {
+        String name = rs.getString("function_name");
+        if (name == null) {
+            return null;
+        }
+        return new FunctionDetails(name, json.readValue(rs.getString("parameters"), PARAMETER_LIST),
+                rs.getString("return_type"), rs.getString("starter_code"));
     }
 
     public void insert(UUID id, CreateProblemRequest r) {
         jdbc.sql("""
-                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
-                VALUES (:id, :slug, :title, :statementMd, :difficulty, :points, :timeLimitMs, :memoryLimitMb)
+                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,
+                                      function_name, parameters, return_type, starter_code)
+                VALUES (:id, :slug, :title, :statementMd, :difficulty, :points, :timeLimitMs, :memoryLimitMb,
+                        :functionName, CAST(:parameters AS jsonb), :returnType, :starterCode)
                 """)
                 .param("id", id)
                 .param("slug", r.slug())
@@ -42,13 +66,18 @@ public class ProblemRepository {
                 .param("points", r.points())
                 .param("timeLimitMs", r.timeLimitMs())
                 .param("memoryLimitMb", r.memoryLimitMb())
+                .param("functionName", r.functionName())
+                .param("parameters", json.writeValueAsString(r.parameters()))
+                .param("returnType", r.returnType())
+                .param("starterCode", r.starterCode())
                 .update();
     }
 
     /** Row-locks the problem until the transaction ends, so concurrent writes to it run one after another. */
     public Optional<LockedFields> lockById(UUID id) {
         return jdbc.sql("""
-                SELECT status, current_version, difficulty, points, time_limit_ms, memory_limit_mb
+                SELECT status, current_version, difficulty, points, time_limit_ms, memory_limit_mb,
+                       function_name, parameters, return_type, starter_code
                   FROM problems
                  WHERE id = :id
                    FOR UPDATE
@@ -60,7 +89,8 @@ public class ProblemRepository {
                         rs.getString("difficulty"),
                         rs.getInt("points"),
                         rs.getInt("time_limit_ms"),
-                        rs.getInt("memory_limit_mb")))
+                        rs.getInt("memory_limit_mb"),
+                        functionDetails(rs)))
                 .optional();
     }
 
@@ -68,7 +98,9 @@ public class ProblemRepository {
         jdbc.sql("""
                 UPDATE problems
                    SET title = :title, statement_md = :statementMd, difficulty = :difficulty, points = :points,
-                       time_limit_ms = :timeLimitMs, memory_limit_mb = :memoryLimitMb, updated_at = now()
+                       time_limit_ms = :timeLimitMs, memory_limit_mb = :memoryLimitMb,
+                       function_name = :functionName, parameters = CAST(:parameters AS jsonb),
+                       return_type = :returnType, starter_code = :starterCode, updated_at = now()
                  WHERE id = :id
                 """)
                 .param("id", id)
@@ -78,6 +110,10 @@ public class ProblemRepository {
                 .param("points", r.points())
                 .param("timeLimitMs", r.timeLimitMs())
                 .param("memoryLimitMb", r.memoryLimitMb())
+                .param("functionName", r.functionName())
+                .param("parameters", json.writeValueAsString(r.parameters()))
+                .param("returnType", r.returnType())
+                .param("starterCode", r.starterCode())
                 .update();
     }
 
@@ -95,15 +131,22 @@ public class ProblemRepository {
     // ---- internal (judge) reads ----
 
     /** What the judge needs from the problem row; currentVersion is null until the first publish. */
-    public record JudgeLimits(@Nullable Integer currentVersion, int timeLimitMs, int memoryLimitMb) {}
+    public record JudgeLimits(
+            @Nullable Integer currentVersion, int timeLimitMs, int memoryLimitMb, @Nullable FunctionDetails function) {}
 
     public Optional<JudgeLimits> findJudgeLimits(UUID id) {
-        return jdbc.sql("SELECT current_version, time_limit_ms, memory_limit_mb FROM problems WHERE id = :id")
+        return jdbc.sql("""
+                SELECT current_version, time_limit_ms, memory_limit_mb,
+                       function_name, parameters, return_type, starter_code
+                  FROM problems
+                 WHERE id = :id
+                """)
                 .param("id", id)
                 .query((rs, rowNum) -> new JudgeLimits(
                         rs.getObject("current_version", Integer.class),
                         rs.getInt("time_limit_ms"),
-                        rs.getInt("memory_limit_mb")))
+                        rs.getInt("memory_limit_mb"),
+                        functionDetails(rs)))
                 .optional();
     }
 
@@ -112,11 +155,12 @@ public class ProblemRepository {
     /** A published problem plus the version its samples come from (never null once published). */
     public record PublishedProblem(
             UUID id, String slug, String title, String statementMd, String difficulty,
-            int points, int timeLimitMs, int memoryLimitMb, int currentVersion) {}
+            int points, int timeLimitMs, int memoryLimitMb, int currentVersion, @Nullable String starterCode) {}
 
     public Optional<PublishedProblem> findPublishedBySlug(String slug) {
         return jdbc.sql("""
-                SELECT id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb, current_version
+                SELECT id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb, current_version,
+                       starter_code
                   FROM problems
                  WHERE slug = :slug AND status = 'published'
                 """)
@@ -130,7 +174,8 @@ public class ProblemRepository {
                         rs.getInt("points"),
                         rs.getInt("time_limit_ms"),
                         rs.getInt("memory_limit_mb"),
-                        rs.getInt("current_version")))
+                        rs.getInt("current_version"),
+                        rs.getString("starter_code")))
                 .optional();
     }
 
@@ -190,24 +235,32 @@ public class ProblemRepository {
     public Optional<AdminProblemView> findForAdmin(UUID id) {
         return jdbc.sql("""
                 SELECT id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,
+                       function_name, parameters, return_type, starter_code,
                        status, current_version, created_at, updated_at
                   FROM problems
                  WHERE id = :id
                 """)
                 .param("id", id)
-                .query((rs, rowNum) -> new AdminProblemView(
-                        rs.getObject("id", UUID.class),
-                        rs.getString("slug"),
-                        rs.getString("title"),
-                        rs.getString("statement_md"),
-                        rs.getString("difficulty"),
-                        rs.getInt("points"),
-                        rs.getInt("time_limit_ms"),
-                        rs.getInt("memory_limit_mb"),
-                        rs.getString("status"),
-                        rs.getObject("current_version", Integer.class),
-                        rs.getTimestamp("created_at").toInstant(),
-                        rs.getTimestamp("updated_at").toInstant()))
+                .query((rs, rowNum) -> {
+                    FunctionDetails function = functionDetails(rs);
+                    return new AdminProblemView(
+                            rs.getObject("id", UUID.class),
+                            rs.getString("slug"),
+                            rs.getString("title"),
+                            rs.getString("statement_md"),
+                            rs.getString("difficulty"),
+                            rs.getInt("points"),
+                            rs.getInt("time_limit_ms"),
+                            rs.getInt("memory_limit_mb"),
+                            function == null ? null : function.functionName(),
+                            function == null ? null : function.parameters(),
+                            function == null ? null : function.returnType(),
+                            function == null ? null : function.starterCode(),
+                            rs.getString("status"),
+                            rs.getObject("current_version", Integer.class),
+                            rs.getTimestamp("created_at").toInstant(),
+                            rs.getTimestamp("updated_at").toInstant());
+                })
                 .optional();
     }
 }

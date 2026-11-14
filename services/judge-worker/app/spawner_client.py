@@ -20,6 +20,7 @@ class SpawnerClient:
         stdin: str,
         time_limit_ms: int,
         memory_limit_mb: int,
+        driver_code: str | None = None,
     ) -> dict:
         resp = self._client.post(
             "/execute",
@@ -27,6 +28,7 @@ class SpawnerClient:
                 "submission_id": submission_id,
                 "language": language,
                 "source_code": source_code,
+                "driver_code": driver_code,
                 "stdin": stdin,
                 "time_limit_ms": time_limit_ms,
                 "memory_limit_mb": memory_limit_mb,

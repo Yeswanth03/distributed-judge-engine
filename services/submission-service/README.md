@@ -79,6 +79,9 @@ Environment variables. With `APP_PROFILE=local` (the default) everything has a w
 | `REAPER_INTERVAL` | `30s` | |
 | `REAPER_QUEUED_TIMEOUT` | `30m` | Generous, so a contest backlog is not reaped |
 | `REAPER_RUNNING_TIMEOUT` | `5m` | |
+| `RUNS_PER_MINUTE` | `10` | Trial runs one user may start per minute |
+| `RUN_TIMEOUT` | `2m` | A run with no result after this is `FAILED` |
+| `RUN_RETENTION` | `24h` | How long runs are kept |
 | `SHUTDOWN_TIMEOUT` | `15s` | |
 | `LOG_LEVEL` | `info` | Logs are JSON lines with a `request_id` |
 
@@ -90,6 +93,8 @@ Environment variables. With `APP_PROFILE=local` (the default) everything has a w
 | `GET /api/v1/submissions/{id}` | One submission (`?include=code` for the code) |
 | `GET /api/v1/submissions?problem_id=&limit=&cursor=` | Your submissions, newest first |
 | `GET /api/v1/submissions/{id}/events` | SSE stream |
+| `POST /api/v1/runs` | Trial run on the samples or your own inputs; never scored (`202` + `Location`) |
+| `GET /api/v1/runs/{id}` | A run and, once finished, its result per case |
 | `GET /healthz` | Liveness (checks nothing external) |
 | `GET /readyz` | Readiness (database and broker) |
 | `GET /metrics` | Prometheus |

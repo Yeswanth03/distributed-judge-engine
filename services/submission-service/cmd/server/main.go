@@ -100,7 +100,16 @@ func run(cfg config.Config, log *slog.Logger) error {
 		Exchange:       broker.VerdictExchange,
 		RoutingKey:     broker.StatusRoutingKey,
 	}, log.With("component", "reaper"))
-	for _, run := range []func(context.Context){relay.Run, dbConsumer.Run, sseConsumer.Run, stuck.Run} {
+	runResults := &consumer.RunResultConsumer{
+		Conn: mq, Store: repo, Queue: broker.RunResultsQueue, Prefetch: 10,
+		Log: log.With("component", "run-result-consumer"),
+	}
+	runJanitor := reaper.NewRunJanitor(repo, reaper.RunJanitorOptions{
+		Interval:  cfg.ReaperInterval,
+		Timeout:   cfg.RunTimeout,
+		Retention: cfg.RunRetention,
+	}, log.With("component", "run-janitor"))
+	for _, run := range []func(context.Context){relay.Run, dbConsumer.Run, sseConsumer.Run, stuck.Run, runResults.Run, runJanitor.Run} {
 		workDone.Go(func() { run(workCtx) })
 	}
 
@@ -110,6 +119,8 @@ func run(cfg config.Config, log *slog.Logger) error {
 		CORSOrigin:       cfg.CORSOrigin,
 		NudgeOutbox:      relay.Nudge,
 		Hub:              hub,
+		Runs:             repo,
+		RunsPerMinute:    cfg.RunsPerMinute,
 		Readiness: []handler.ReadinessCheck{
 			{Name: "database", Check: repo.Ping},
 			{Name: "broker", Check: mq.Check},

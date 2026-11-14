@@ -50,6 +50,15 @@
       "auto_delete": false,
       "internal": false,
       "arguments": {}
+    },
+    {
+      "name": "users",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
     }
   ],
   "queues": [
@@ -111,6 +120,48 @@
       "durable": true,
       "auto_delete": false,
       "arguments": {}
+    },
+    {
+      "name": "runs.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 3,
+        "x-dead-letter-exchange": "dead-letter",
+        "x-dead-letter-routing-key": "runs.dlq"
+      }
+    },
+    {
+      "name": "runs.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
+    },
+    {
+      "name": "submission-service.run-results.queue",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum",
+        "x-delivery-limit": 5,
+        "x-dead-letter-exchange": "dead-letter",
+        "x-dead-letter-routing-key": "submission-service.run-results.dlq"
+      }
+    },
+    {
+      "name": "submission-service.run-results.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-queue-type": "quorum"
+      }
     }
   ],
   "bindings": [
@@ -152,6 +203,22 @@
       "destination": "catalog.verdicts.dlq",
       "destination_type": "queue",
       "routing_key": "catalog.verdicts",
+      "arguments": {}
+    },
+    {
+      "source": "dead-letter",
+      "vhost": "/",
+      "destination": "runs.dlq",
+      "destination_type": "queue",
+      "routing_key": "runs.dlq",
+      "arguments": {}
+    },
+    {
+      "source": "dead-letter",
+      "vhost": "/",
+      "destination": "submission-service.run-results.dlq",
+      "destination_type": "queue",
+      "routing_key": "submission-service.run-results.dlq",
       "arguments": {}
     }
   ]

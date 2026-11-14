@@ -83,7 +83,8 @@ public class AdminProblemController {
 
     @PostMapping
     @Operation(summary = "Create a problem",
-            description = "Stores a new problem as a draft. It stays hidden until a test set version is published.")
+            description = "Stores a new problem as a draft, with the function users implement: function_name, parameters, "
+                    + "return_type and starter_code. It stays hidden until a test set version is published.")
     @ApiResponse(responseCode = "201", description = "Created; returns the problem id")
     @ApiResponse(responseCode = "400", description = "Malformed JSON body", content = @Content(
             schema = @Schema(implementation = ApiError.class),
@@ -107,7 +108,8 @@ public class AdminProblemController {
     @PutMapping("/{id}")
     @Operation(summary = "Replace a problem's editable fields",
             description = "Send every field. The slug cannot change. Once the problem is published, difficulty, "
-                    + "points and limits are locked (resending the same values is fine); title and statement can change.")
+                    + "points, limits and function details are locked (resending the same values is fine); title and "
+                    + "statement can change.")
     @ApiResponse(responseCode = "204", description = "Updated", content = @Content)
     @ApiResponse(responseCode = "400", description = "Malformed JSON body or id is not a UUID", content = @Content(
             schema = @Schema(implementation = ApiError.class),
@@ -120,8 +122,8 @@ public class AdminProblemController {
             examples = @ExampleObject(value = "{\"error\":\"not_found\",\"message\":\"problem not found\"}")))
     @ApiResponse(responseCode = "409", description = "Locked field changed on a published problem", content = @Content(
             schema = @Schema(implementation = ApiError.class),
-            examples = @ExampleObject(value = "{\"error\":\"conflict\",\"message\":\"difficulty, points and limits "
-                    + "are locked once a problem is published; only title and statement can change\"}")))
+            examples = @ExampleObject(value = "{\"error\":\"conflict\",\"message\":\"difficulty, points, limits and "
+                    + "function details are locked once a problem is published; only title and statement can change\"}")))
     @ApiResponse(responseCode = "422", description = "A field breaks a rule", content = @Content(
             schema = @Schema(implementation = ApiError.class),
             examples = @ExampleObject(value = "{\"error\":\"validation_failed\",\"message\":\"points must be less "

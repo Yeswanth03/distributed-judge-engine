@@ -54,8 +54,11 @@ class AdminTestsetTest {
         jdbc.sql("TRUNCATE test_cases, testsets, problems CASCADE").update();
         problemId = UUID.randomUUID();
         jdbc.sql("""
-                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb)
-                VALUES (:id, 'two-sum', 'Two Sum', 'Find the pair.', 'easy', 100, 1000, 256)
+                INSERT INTO problems (id, slug, title, statement_md, difficulty, points, time_limit_ms, memory_limit_mb,
+                                      function_name, parameters, return_type, starter_code)
+                VALUES (:id, 'two-sum', 'Two Sum', 'Find the pair.', 'easy', 100, 1000, 256, 'twoSum',
+                        '[{"name":"nums","type":"int[]"},{"name":"target","type":"int"}]', 'int[]',
+                        E'class Solution:\\n    def twoSum(self, nums, target):\\n        pass\\n')
                 """)
                 .param("id", problemId)
                 .update();
@@ -76,9 +79,9 @@ class AdminTestsetTest {
                  WHERE problem_id = :id AND testset_version = 1 ORDER BY ordinal
                 """).param("id", problemId).query().listOfRows();
         assertThat(cases).hasSize(2);
-        assertThat(cases.get(0)).containsEntry("ordinal", 1).containsEntry("input", "2 7 11 15\n9")
-                .containsEntry("expected_output", "0 1").containsEntry("is_sample", true);
-        assertThat(cases.get(1)).containsEntry("ordinal", 2).containsEntry("expected_output", "")
+        assertThat(cases.get(0)).containsEntry("ordinal", 1).containsEntry("input", "{\"nums\":[2,7,11,15],\"target\":9}")
+                .containsEntry("expected_output", "[0,1]").containsEntry("is_sample", true);
+        assertThat(cases.get(1)).containsEntry("ordinal", 2).containsEntry("expected_output", "[0,1]")
                 .containsEntry("is_sample", false);
     }
 
@@ -93,6 +96,69 @@ class AdminTestsetTest {
     }
 
     @Test
+    void casesAreStoredCompactInParameterOrderSoEquivalentJsonHashesTheSame() throws Exception {
+        String compact = hashOf(upload(problemId, List.of(testCase("{\"nums\":[1,2],\"target\":3}", "[0,1]", true))));
+        String spaced = hashOf(upload(problemId, List.of(testCase(" { \"target\": 3, \"nums\": [1, 2] } ", " [0, 1] ", true))));
+
+        assertThat(spaced).isEqualTo(compact);
+    }
+
+    @Test
+    void casesThatDoNotMatchTheFunctionAreRejected() throws Exception {
+        String good = "{\"nums\":[1,2],\"target\":3}";
+        Map<String, String> message = new LinkedHashMap<>();
+        message.put("1 2\n3", "cases[0].input must be valid JSON");
+        message.put("[1,2]", "cases[0].input must be a JSON object of the function's arguments");
+        message.put("{\"nums\":[1,2]}", "cases[0].input is missing the argument 'target'");
+        message.put("{\"nums\":[1,\"2\"],\"target\":3}", "cases[0].input argument 'nums' must be int[]");
+        message.put("{\"nums\":[1,2],\"target\":3.5}", "cases[0].input argument 'target' must be int");
+        message.put("{\"nums\":[1,2],\"target\":3,\"extra\":1}", "cases[0].input has arguments the function does not take");
+        message.put("{\"nums\":[1,2],\"target\":3,\"target\":4}", "cases[0].input must be valid JSON");
+        for (var entry : message.entrySet()) {
+            upload(problemId, List.of(testCase(entry.getKey(), "[0,1]", true)))
+                    .andExpect(status().isUnprocessableContent())
+                    .andExpect(jsonPath("$.message").value(entry.getValue()));
+        }
+
+        upload(problemId, List.of(testCase(good, "0", true)))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value("cases[0].expected_output must be int[]"));
+        upload(problemId, List.of(testCase(good, "", true)))
+                .andExpect(status().isUnprocessableContent());
+        upload(problemId, List.of(testCase(good, "[0,1]", true), testCase(good, "null", false)))
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value("cases[1].expected_output must be int[]"));
+        assertThat(jdbc.sql("SELECT COUNT(*) FROM testsets").query(Integer.class).single()).isZero();
+    }
+
+    @Test
+    void problemWithoutFunctionDetailsCannotTakeOrPublishTestCases() throws Exception {
+        upload(problemId, twoCases());
+        jdbc.sql("""
+                UPDATE problems SET function_name = NULL, parameters = NULL, return_type = NULL, starter_code = NULL
+                """).update();
+
+        upload(problemId, twoCases())
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value(containsString("function details")));
+        publish(problemId, 1).andExpect(status().isUnprocessableContent());
+
+        assertThat(testsetStatus(1)).isEqualTo("draft");
+    }
+
+    @Test
+    void publishRechecksCasesAgainstTheCurrentFunction() throws Exception {
+        upload(problemId, twoCases());
+        jdbc.sql("UPDATE problems SET return_type = 'int'").update();
+
+        publish(problemId, 1)
+                .andExpect(status().isUnprocessableContent())
+                .andExpect(jsonPath("$.message").value("cases[0].expected_output must be int"));
+
+        assertThat(testsetStatus(1)).isEqualTo("draft");
+    }
+
+    @Test
     void uploadToUnknownProblemIsNotFound() throws Exception {
         upload(UUID.randomUUID(), twoCases())
                 .andExpect(status().isNotFound())
@@ -101,7 +167,7 @@ class AdminTestsetTest {
 
     @Test
     void uploadWithoutASampleCaseIsRejected() throws Exception {
-        upload(problemId, List.of(testCase("1", "1", false)))
+        upload(problemId, List.of(testCase("{\"nums\":[1,2],\"target\":3}", "[0,1]", false)))
                 .andExpect(status().isUnprocessableContent())
                 .andExpect(jsonPath("$.message").value("cases must include at least one sample case"));
         assertThat(jdbc.sql("SELECT COUNT(*) FROM testsets").query(Integer.class).single()).isZero();
@@ -217,9 +283,10 @@ class AdminTestsetTest {
                 .header("X-User-Role", "admin"));
     }
 
-    /** One sample case and one hidden case whose expected output is empty. */
+    /** One sample case and one hidden case. */
     private static List<Map<String, Object>> twoCases() {
-        return List.of(testCase("2 7 11 15\n9", "0 1", true), testCase("0\n0", "", false));
+        return List.of(testCase("{\"nums\":[2,7,11,15],\"target\":9}", "[0,1]", true),
+                testCase("{\"target\":0,\"nums\":[0,0]}", "[0,1]", false));
     }
 
     private static Map<String, Object> testCase(String input, String expectedOutput, boolean sample) {
