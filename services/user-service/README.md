@@ -64,6 +64,7 @@ curl localhost:8085/users/me -H "X-User-Id: <sub from the access token>"
 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | none | Sign in with GitHub; same rule. Callback: `PUBLIC_BASE_URL/auth/oauth/github/callback` |
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Where browsers reach the gateway |
 | `OAUTH_ALLOWED_REDIRECTS` | `http://localhost:5500,http://localhost:8000` | Origins a sign-in may return to |
+| `REFRESH_COOKIE_SECURE` | `false` in local, `true` otherwise | `Secure` flag on the browser's refresh-token cookie (HTTPS only) |
 | `CORS_ORIGIN` | empty | |
 | `OUTBOX_*`, `SHUTDOWN_TIMEOUT`, `HTTP_ADDR`, `LOG_LEVEL` | as in the Submission Service | |
 
