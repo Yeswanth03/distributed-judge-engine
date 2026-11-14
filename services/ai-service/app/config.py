@@ -23,7 +23,9 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 5.0
 
     ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.2"
+    # Code-specialized model: on a real Two Sum off-by-one bug it named the cause in
+    # 3/3 runs, where llama3.2 gave wrong advice in every run. About 4.7 GB.
+    ollama_model: str = "qwen2.5-coder:7b"
     ollama_timeout_seconds: float = 120.0
     prompt_version: str = "2"
 

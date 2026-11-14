@@ -141,7 +141,7 @@ class FakeDatabase:
         now = self._now()
         row = {
             "request_id": uuid4(), "status": "queued", "feedback": None, "error_reason": None,
-            "model_name": "llama3.2", "prompt_version": "2", "input_tokens": None,
+            "model_name": "qwen2.5-coder:7b", "prompt_version": "2", "input_tokens": None,
             "output_tokens": None, "created_at": now, "updated_at": now, **fields,
         }
         self.rows[row["request_id"]] = row
