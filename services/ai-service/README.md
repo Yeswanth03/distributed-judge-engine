@@ -132,6 +132,7 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_GENERATION_ATTEMPTS` | `3` | Attempts per request on transient failures |
 | `AI_SWEEP_INTERVAL_SECONDS` | `30` | How often queued/stuck requests are resumed |
 | `AI_API_HOST` / `AI_API_PORT` | `0.0.0.0` / `8084` | HTTP bind address |
+| `AI_CORS_ORIGINS` | `*` | Origins allowed to call the service from a browser: `*` or a comma-separated list |
 
 ## Open points with other teams
 

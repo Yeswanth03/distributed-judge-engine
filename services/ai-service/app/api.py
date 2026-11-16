@@ -8,6 +8,7 @@ from fastapi import FastAPI, Header, HTTPException, Response, status
 
 from .broker import consume_forever
 from .clients import ContextNotFound
+from .cors import cors_middleware
 from .database import feedback_database
 from .feedback import SubmissionNotJudged, feedback_processor
 from .schemas import FeedbackResponse
@@ -34,6 +35,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(
+    middleware=cors_middleware(),
     title="AI Feedback Service",
     description=(
         "Feedback on code submissions. Source code comes from the Submission Service and the "
