@@ -55,6 +55,68 @@ services:
       timeout: 3s
       retries: 10
 
+  # AI Feedback Service (services/ai-service): turns failed verdicts into LLM feedback. The gateway
+  # routes /api/v1/ai/* here. Catalog isn't in this file yet: by default the service reaches the
+  # Catalog run from the IDE on the host's port 8080 (set AI_CATALOG_BASE_URL=http://catalog:8080
+  # once Catalog runs in Compose).
+  ai-service:
+    build: ./services/ai-service
+    environment:
+      AI_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_feedback
+      AI_RABBITMQ_URL: amqp://judge:judge@rabbitmq:5672/
+      AI_SUBMISSION_BASE_URL: http://submission-service:8080
+      AI_CATALOG_BASE_URL: ${AI_CATALOG_BASE_URL:-http://host.docker.internal:8080}
+      AI_INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:-local-dev-token}
+      # Ollama in Compose by default. On a Mac, Docker has no GPU access, so generation is
+      # faster with the Ollama app running natively: AI_OLLAMA_BASE_URL=http://host.docker.internal:11434
+      AI_OLLAMA_BASE_URL: ${AI_OLLAMA_BASE_URL:-http://ollama:11434}
+      AI_OLLAMA_MODEL: ${AI_OLLAMA_MODEL:-qwen2.5-coder:7b}
+    ports:
+      - "${AI_SERVICE_PORT:-8084}:8084"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach services on your machine (Linux; built in on Mac)
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      submission-service:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8084/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # Local LLM server for the AI service. Models are kept in the ollama-models volume, so the
+  # model is downloaded once, not on every start.
+  ollama:
+    image: ollama/ollama:0.5.7
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "${OLLAMA_PORT:-11435}:11434"   # 11435 on the host, so it never clashes with a native Ollama app
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-off: downloads the AI service's model into the ollama volume (about 4.7 GB the first
+  # time, then a quick check), and exits. The AI service starts after it succeeds.
+  ollama-pull:
+    image: ollama/ollama:0.5.7
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "${AI_OLLAMA_MODEL:-qwen2.5-coder:7b}"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: "no"
+
   user-service:
     build: ./services/user-service
     environment:
@@ -129,3 +191,4 @@ services:
 
 volumes:
   postgres-data:
+  ollama-models:
