@@ -226,6 +226,7 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_BREAKER_OPEN_SECONDS` | `10` | How long a circuit stays open before a trial call |
 | `AI_MAX_DEFER_SECONDS` | `1800` | A request waiting on an open circuit gives up after this |
 | `AI_API_HOST` / `AI_API_PORT` | `0.0.0.0` / `8084` | HTTP bind address |
+| `AI_CORS_ORIGINS` | `*` | Origins allowed to call the service from a browser: `*` or a comma-separated list |
 
 ## Open points with other teams
 

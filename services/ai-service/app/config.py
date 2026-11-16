@@ -52,5 +52,8 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8084
 
+    # Origins allowed to call this service from a browser: "*" or a comma-separated list.
+    cors_origins: str = "*"
+
 
 settings = Settings()
