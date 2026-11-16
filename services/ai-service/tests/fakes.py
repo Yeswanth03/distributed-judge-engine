@@ -180,6 +180,9 @@ class FakeDatabase:
     def set_problem_id(self, request_id, problem_id):
         self.rows[request_id]["problem_id"] = problem_id
 
+    def touch(self, request_id):
+        self.touches = getattr(self, "touches", 0) + 1
+
     def save_feedback(self, request_id, feedback, input_tokens, output_tokens):
         self.rows[request_id].update(status="ready", feedback=feedback, input_tokens=input_tokens,
                                      output_tokens=output_tokens, error_reason=None)

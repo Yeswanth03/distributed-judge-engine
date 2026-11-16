@@ -116,6 +116,8 @@ class FeedbackProcessor:
         request_id, source = row["request_id"], row["request_source"]
         last_error = "unknown error"
         for attempt in range(1, settings.generation_attempts + 1):
+            # Heartbeat: shows the sweep this request is still being worked on.
+            self.database.touch(request_id)
             try:
                 context = self._load_context(row)
                 self.database.set_problem_id(request_id, context.problem.problem_id)
@@ -238,7 +240,7 @@ class FeedbackProcessor:
                 self._in_flight.discard(request_id)
 
     def _sweep_loop(self) -> None:
-        stale_after = settings.ollama_timeout_seconds * settings.generation_attempts + 60
+        stale_after = settings.processing_stale_seconds
         while not self._stop.is_set():
             try:
                 for request_id in self.database.pending_request_ids(stale_after):
