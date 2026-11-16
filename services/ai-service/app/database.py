@@ -157,12 +157,13 @@ class FeedbackDatabase:
                 (request_id,),
             ).fetchone()
 
-    def requeue_for_retry(self, request_id: UUID) -> None:
+    def requeue_for_retry(self, request_id: UUID, reason: str | None = None) -> None:
+        """Back to queued for the sweep to pick up; reason tells the user why it waits."""
         with self._connect() as connection:
             connection.execute(
-                "UPDATE feedback_requests SET status = 'queued', updated_at = now() "
+                "UPDATE feedback_requests SET status = 'queued', error_reason = %s, updated_at = now() "
                 "WHERE request_id = %s AND status = 'processing'",
-                (request_id,),
+                (reason[:500] if reason else None, request_id),
             )
 
     def set_problem_id(self, request_id: UUID, problem_id: str) -> None:

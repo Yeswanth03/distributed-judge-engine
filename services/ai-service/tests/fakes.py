@@ -11,6 +11,7 @@ from uuid import uuid4
 import httpx
 
 from app.clients import CatalogClient, SubmissionClient
+from app.resilience import new_breaker
 
 USER = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 SUBMISSION = "dc7626b3-f4e7-4194-a625-300911712913"
@@ -114,11 +115,16 @@ class FakeServices:
             return httpx.Response(200, json=testset)
         return httpx.Response(404, json={"error": "not_found", "message": "no such route"})
 
-    def clients(self) -> tuple[SubmissionClient, CatalogClient]:
+    def clients(self, clock=None) -> tuple[SubmissionClient, CatalogClient]:
+        """Real clients over a fake transport, each with its own fresh circuit breaker
+        (so one test's failures never leak into another through the shared breakers)."""
         transport = httpx.MockTransport(self.handle)
+        extra = {"clock": clock} if clock else {}
         return (
-            SubmissionClient(httpx.Client(base_url="http://submission", transport=transport)),
-            CatalogClient(httpx.Client(base_url="http://catalog", transport=transport)),
+            SubmissionClient(httpx.Client(base_url="http://submission", transport=transport),
+                             breaker=new_breaker("submission", **extra)),
+            CatalogClient(httpx.Client(base_url="http://catalog", transport=transport),
+                          breaker=new_breaker("catalog", **extra)),
         )
 
 
@@ -167,9 +173,9 @@ class FakeDatabase:
         row["status"] = "processing"
         return row
 
-    def requeue_for_retry(self, request_id):
+    def requeue_for_retry(self, request_id, reason=None):
         if self.rows[request_id]["status"] == "processing":
-            self.rows[request_id]["status"] = "queued"
+            self.rows[request_id].update(status="queued", error_reason=reason)
 
     def set_problem_id(self, request_id, problem_id):
         self.rows[request_id]["problem_id"] = problem_id
@@ -196,16 +202,26 @@ class FakeDatabase:
 
 
 class FakeOllama:
-    def __init__(self, failures: int = 0):
-        self.prompts: list = []
+    """Goes through a real circuit breaker like OllamaClient. `failures` fails the
+    next N calls; `down = True` fails every call until set back to False."""
+
+    def __init__(self, failures: int = 0, clock=None):
+        self.calls = 0           # every call that actually reached "Ollama"
+        self.prompts: list = []  # prompts of the calls that succeeded
         self.failures = failures
+        self.down = False
+        self.breaker = new_breaker("ollama", **({"clock": clock} if clock else {}))
 
     def generate_feedback(self, context):
+        return self.breaker.call(lambda: self._generate(context))
+
+    def _generate(self, context):
         from app.ollama_client import GeneratedFeedback, build_prompt
 
-        self.prompts.append(build_prompt(context))
-        if self.failures:
-            self.failures -= 1
+        self.calls += 1
+        if self.down or self.failures:
+            self.failures = max(0, self.failures - 1)
             raise httpx.ConnectError("ollama down")
+        self.prompts.append(build_prompt(context))
         return GeneratedFeedback(text="Check the operator: you subtract instead of add.",
                                  input_tokens=120, output_tokens=12)

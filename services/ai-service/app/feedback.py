@@ -11,6 +11,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from uuid import UUID
 
 import httpx
@@ -21,6 +22,7 @@ from .config import settings
 from .database import FeedbackDatabase, feedback_database
 from .models import FailedVerdictEvent
 from .ollama_client import OllamaClient
+from .resilience import CircuitOpenError, backoff_delay
 from .schemas import FeedbackContext
 
 logger = logging.getLogger("ai_service.feedback")
@@ -41,13 +43,14 @@ class FeedbackProcessor:
         submissions: SubmissionClient | None = None,
         catalog: CatalogClient | None = None,
         ollama: OllamaClient | None = None,
-        retry_delay_seconds: float = 2.0,
+        retry_delay_seconds: float | None = None,
     ) -> None:
         self.database = database
         self.submissions = submissions or SubmissionClient()
         self.catalog = catalog or CatalogClient()
         self.ollama = ollama or OllamaClient()
-        self.retry_delay_seconds = retry_delay_seconds
+        # Base for exponential backoff (settings.retry_base_seconds unless overridden).
+        self.retry_delay_seconds = settings.retry_base_seconds if retry_delay_seconds is None else retry_delay_seconds
         self._executor: ThreadPoolExecutor | None = None
         self._in_flight: set[UUID] = set()
         self._lock = threading.Lock()
@@ -115,14 +118,31 @@ class FeedbackProcessor:
                 logger.warning("feedback unavailable for request %s: %s", request_id, exc)
                 self.database.mark_unavailable(request_id, str(exc))
                 return
+            except CircuitOpenError as exc:
+                # The dependency is known to be down: don't wait or retry against it.
+                self._defer(row, exc)
+                return
             except (httpx.HTTPError, ValueError, KeyError) as exc:
                 last_error = f"{type(exc).__name__}: {exc}"
                 logger.warning("attempt %s/%s failed for request %s: %s",
                                attempt, settings.generation_attempts, request_id, last_error)
                 if attempt < settings.generation_attempts:
-                    time.sleep(self.retry_delay_seconds * attempt)
+                    time.sleep(backoff_delay(attempt, self.retry_delay_seconds, settings.retry_max_seconds))
 
         self.database.mark_unavailable(request_id, last_error)
+
+    def _defer(self, row: dict, exc: CircuitOpenError) -> None:
+        """Put the request back in the queue; the sweep retries it once the circuit
+        lets calls through again. Requests deferred for too long give up, so a
+        dependency that never comes back can't leave them queued forever."""
+        age = (datetime.now(timezone.utc) - row["created_at"]).total_seconds()
+        if age > settings.max_defer_seconds:
+            self.database.mark_unavailable(
+                row["request_id"], f"{exc.dependency} unavailable for over {settings.max_defer_seconds // 60} minutes"
+            )
+            return
+        logger.info("deferring request %s: %s", row["request_id"], exc)
+        self.database.requeue_for_retry(row["request_id"], reason=f"waiting: {exc}")
 
     def _load_context(self, row: dict) -> FeedbackContext:
         details = row.get("judge_details") or {}

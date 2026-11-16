@@ -5,11 +5,13 @@ from uuid import UUID
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 
 from .broker import consume_forever
 from .clients import ContextNotFound
 from .database import feedback_database
 from .feedback import SubmissionNotJudged, feedback_processor
+from .resilience import CircuitOpenError, breakers
 from .schemas import FeedbackResponse
 
 logging.basicConfig(level=logging.INFO)
@@ -55,6 +57,7 @@ app = FastAPI(
         404: {"description": "No such submission for this user."},
         409: {"description": "The submission has not been judged yet."},
         502: {"description": "The Submission Service could not be reached."},
+        503: {"description": "The Submission Service's circuit is open; retry after `retry_after` seconds."},
     },
 )
 def request_feedback(submission_id: UUID, response: Response, x_user_id: str = UserId) -> dict:
@@ -67,6 +70,8 @@ def request_feedback(submission_id: UUID, response: Response, x_user_id: str = U
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found") from exc
     except SubmissionNotJudged as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except CircuitOpenError as exc:
+        return circuit_open_response(exc)
     except httpx.HTTPError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -104,6 +109,24 @@ def get_submission_feedback(submission_id: UUID, x_user_id: str = UserId) -> dic
     return row
 
 
-@app.get("/health", summary="Liveness probe")
+def circuit_open_response(exc: CircuitOpenError) -> JSONResponse:
+    """Fail fast while a dependency's circuit is open, telling the client when to retry."""
+    retry_after = max(1, round(exc.retry_after))
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        headers={"Retry-After": str(retry_after)},
+        content={
+            "status": "circuit_open",
+            "dependency": exc.dependency,
+            "retry_after": retry_after,
+            "message": f"{exc.dependency} is temporarily unavailable",
+        },
+    )
+
+
+@app.get("/health", summary="Liveness probe, with each dependency's circuit state")
 def health() -> dict:
-    return {"status": "ok"}
+    """Always 200 while the process is up: an open circuit is degraded service, not a dead one."""
+    circuits = {name: breaker.snapshot() for name, breaker in breakers.items()}
+    degraded = any(c["state"] != "closed" for c in circuits.values())
+    return {"status": "degraded" if degraded else "ok", "circuits": circuits}
