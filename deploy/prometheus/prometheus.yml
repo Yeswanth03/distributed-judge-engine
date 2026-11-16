@@ -1,0 +1,14 @@
+# Prometheus scrapes (pulls) /metrics from each service. A target that stops answering
+# shows as down instead of silently going quiet.
+global:
+  scrape_interval: 5s      # short, so the dashboard reacts within seconds during a demo
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: ai-service
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - ai-service:8084            # the AI service running in Docker Compose
+          - host.docker.internal:8084  # the AI service running on your machine (local development)
+        # Only one of the two is normally up; the dashboard adds them together.

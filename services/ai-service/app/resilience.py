@@ -82,6 +82,7 @@ class CircuitBreaker:
         self._opened_at = 0.0
         self._trial_in_flight = False
         self._listeners: list[Callable[[str, CircuitState, CircuitState], None]] = []
+        self._call_listeners: list[Callable[[str, str, float | None], None]] = []
 
     # ---- inspection ----
 
@@ -108,17 +109,39 @@ class CircuitBreaker:
         """listener(name, old_state, new_state); used for logging now and metrics later."""
         self._listeners.append(listener)
 
+    def on_call(self, listener: Callable[[str, str, float | None], None]) -> None:
+        """listener(name, outcome, seconds) after every call. outcome is "success",
+        "failure" (counts toward opening), "error" (the caller's fault, e.g. a 404)
+        or "rejected" (circuit open, no call made; seconds is None)."""
+        self._call_listeners.append(listener)
+
     # ---- the guarded call ----
 
     def call(self, fn: Callable[[], T]) -> T:
-        is_trial = self._before_call()
+        try:
+            is_trial = self._before_call()
+        except CircuitOpenError:
+            self._notify_call("rejected", None)
+            raise
+        start = self._clock()
         try:
             result = fn()
         except BaseException as exc:
-            self._after_call(failed=self._is_failure(exc), is_trial=is_trial)
+            failed = self._is_failure(exc)
+            self._after_call(failed=failed, is_trial=is_trial)
+            self._notify_call("failure" if failed else "error", self._clock() - start)
             raise
         self._after_call(failed=False, is_trial=is_trial)
+        self._notify_call("success", self._clock() - start)
         return result
+
+    def _notify_call(self, outcome: str, seconds: float | None) -> None:
+        # Outside the lock: a slow listener must never hold up other threads.
+        for listener in self._call_listeners:
+            try:
+                listener(self.name, outcome, seconds)
+            except Exception:
+                logger.exception("circuit call listener failed")
 
     def _before_call(self) -> bool:
         """Raises CircuitOpenError if the call must not be made; returns True for the half-open trial."""

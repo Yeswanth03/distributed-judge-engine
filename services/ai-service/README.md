@@ -129,6 +129,41 @@ value. The randomness stops many requests retrying at the same instant.
   any circuit isn't closed. The endpoint still returns `200`, because the process
   itself is alive.
 
+## Metrics and dashboard
+
+`GET /metrics` exposes Prometheus metrics. Prometheus scrapes it every 5 s, and
+Grafana shows them on the **AI Feedback Service** dashboard.
+
+```bash
+docker compose up -d prometheus grafana
+```
+
+| Where | URL |
+|---|---|
+| Grafana dashboard (opens on it; view without signing in) | <http://localhost:3000> |
+| Prometheus (targets, ad-hoc queries) | <http://localhost:9090/targets> |
+
+Prometheus scrapes the AI service both as `ai-service:8084` (in Docker Compose)
+and as `host.docker.internal:8084` (running on your machine). Normally only one
+of the two is up, and the dashboard adds them together.
+
+| Signal | Metrics |
+|---|---|
+| Traffic | `ai_http_requests_total{method, route, status}`, `ai_verdict_events_total{verdict}` |
+| Errors | 5xx in `ai_http_requests_total`, `ai_feedback_outcomes_total{outcome="unavailable"}`, `ai_dependency_calls_total{outcome="failure"}`, `ai_verdict_events_rejected_total{reason}` |
+| Latency | `ai_http_request_duration_seconds`, `ai_llm_generation_duration_seconds`, `ai_feedback_time_to_ready_seconds` (the eventual-consistency window), `ai_dependency_call_duration_seconds` |
+| Saturation | `ai_generations_in_flight`, `ai_feedback_requests{status}` (waiting requests) |
+| Spend | `ai_llm_tokens_total{model, direction}` |
+| Resilience | `ai_circuit_breaker_state{dependency}` (0 closed, 1 half-open, 2 open), `ai_circuit_breaker_transitions_total`, `ai_generation_retries_total` |
+
+Tokens are on the dashboard even though Ollama is free. A retry storm or a
+runaway loop shows up there first, and the same panel would track real cost if
+the model ever moved to a paid API.
+
+Routes are recorded as templates (`/submissions/{submission_id}/feedback`), and
+user or submission IDs are never labels, so the number of time series stays
+fixed.
+
 ## API
 
 The gateway authenticates the user and forwards a trusted `X-User-Id` header. This
@@ -140,6 +175,7 @@ service must only be reachable through it.
 | `GET` | `/feedback-requests/{request_id}` | Status and feedback of one request |
 | `GET` | `/submissions/{submission_id}/feedback` | The latest request for the submission |
 | `GET` | `/health` | Liveness, plus each dependency's circuit state |
+| `GET` | `/metrics` | Prometheus metrics (not in Swagger) |
 
 `POST` works for any final verdict, `ACCEPTED` included. It reuses an existing
 `queued`, `processing` or `ready` request for the submission, including the

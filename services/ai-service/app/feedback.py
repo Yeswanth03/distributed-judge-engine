@@ -19,6 +19,7 @@ import psycopg
 
 from .clients import CatalogClient, ContextNotFound, SubmissionClient
 from .config import settings
+from . import metrics
 from .database import FeedbackDatabase, feedback_database
 from .models import FailedVerdictEvent
 from .ollama_client import OllamaClient
@@ -71,6 +72,7 @@ class FeedbackProcessor:
             idempotency_key=f"verdict:{event.submission_id}:{event.rejudge_seq}",
             judge_details=event.judge_details(),
         )
+        metrics.VERDICT_EVENTS.labels(event.verdict.value).inc()
         logger.info("failed verdict queued: submission=%s request=%s status=%s",
                     event.submission_id, row["request_id"], row["status"])
         if row["status"] == "queued":
@@ -92,6 +94,8 @@ class FeedbackProcessor:
             problem_id=None,
             verdict=submission.verdict,
         )
+        if created:
+            metrics.FEEDBACK_REQUESTS_CREATED.labels("user_request").inc()
         if row["status"] == "queued":
             self.submit(row["request_id"])
         return row, created
@@ -102,21 +106,32 @@ class FeedbackProcessor:
         row = self.database.claim(request_id)
         if row is None:
             return  # already done, or another worker is on it
+        metrics.GENERATIONS_IN_FLIGHT.inc()
+        try:
+            self._generate(row)
+        finally:
+            metrics.GENERATIONS_IN_FLIGHT.dec()
 
+    def _generate(self, row: dict) -> None:
+        request_id, source = row["request_id"], row["request_source"]
         last_error = "unknown error"
         for attempt in range(1, settings.generation_attempts + 1):
             try:
                 context = self._load_context(row)
                 self.database.set_problem_id(request_id, context.problem.problem_id)
+                started = time.monotonic()
                 generated = self.ollama.generate_feedback(context)
+                metrics.LLM_GENERATION_SECONDS.labels(settings.ollama_model).observe(time.monotonic() - started)
                 self.database.save_feedback(
                     request_id, generated.text, generated.input_tokens, generated.output_tokens
                 )
+                self._record_ready(row, generated)
                 logger.info("feedback ready: request=%s submission=%s", request_id, row["submission_id"])
                 return
             except ContextNotFound as exc:
                 logger.warning("feedback unavailable for request %s: %s", request_id, exc)
                 self.database.mark_unavailable(request_id, str(exc))
+                metrics.FEEDBACK_OUTCOMES.labels(source, "unavailable").inc()
                 return
             except CircuitOpenError as exc:
                 # The dependency is known to be down: don't wait or retry against it.
@@ -127,9 +142,22 @@ class FeedbackProcessor:
                 logger.warning("attempt %s/%s failed for request %s: %s",
                                attempt, settings.generation_attempts, request_id, last_error)
                 if attempt < settings.generation_attempts:
+                    metrics.GENERATION_RETRIES.labels(type(exc).__name__).inc()
                     time.sleep(backoff_delay(attempt, self.retry_delay_seconds, settings.retry_max_seconds))
 
         self.database.mark_unavailable(request_id, last_error)
+        metrics.FEEDBACK_OUTCOMES.labels(source, "unavailable").inc()
+
+    @staticmethod
+    def _record_ready(row: dict, generated) -> None:
+        source = row["request_source"]
+        metrics.FEEDBACK_OUTCOMES.labels(source, "ready").inc()
+        if generated.input_tokens:
+            metrics.LLM_TOKENS.labels(settings.ollama_model, "input").inc(generated.input_tokens)
+        if generated.output_tokens:
+            metrics.LLM_TOKENS.labels(settings.ollama_model, "output").inc(generated.output_tokens)
+        waited = (datetime.now(timezone.utc) - row["created_at"]).total_seconds()
+        metrics.FEEDBACK_TIME_TO_READY.labels(source).observe(max(0.0, waited))
 
     def _defer(self, row: dict, exc: CircuitOpenError) -> None:
         """Put the request back in the queue; the sweep retries it once the circuit
@@ -140,9 +168,11 @@ class FeedbackProcessor:
             self.database.mark_unavailable(
                 row["request_id"], f"{exc.dependency} unavailable for over {settings.max_defer_seconds // 60} minutes"
             )
+            metrics.FEEDBACK_OUTCOMES.labels(row["request_source"], "unavailable").inc()
             return
         logger.info("deferring request %s: %s", row["request_id"], exc)
         self.database.requeue_for_retry(row["request_id"], reason=f"waiting: {exc}")
+        metrics.FEEDBACK_OUTCOMES.labels(row["request_source"], "deferred").inc()
 
     def _load_context(self, row: dict) -> FeedbackContext:
         details = row.get("judge_details") or {}
@@ -213,6 +243,8 @@ class FeedbackProcessor:
             try:
                 for request_id in self.database.pending_request_ids(stale_after):
                     self.submit(request_id)
+                for status, count in self.database.status_counts().items():
+                    metrics.FEEDBACK_REQUESTS.labels(status).set(count)
             except Exception:
                 logger.exception("feedback sweep failed, retrying next tick")
             self._stop.wait(settings.sweep_interval_seconds)
