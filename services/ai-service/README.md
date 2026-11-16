@@ -20,7 +20,39 @@ verdicts exchange ──verdict.<failure>──► ai.feedback.jobs ──► AI
 **Hidden test cases never reach the model.** Only sample cases are put in the
 prompt. When the failing test is hidden, the prompt says only its number.
 
-## Run locally
+## Run with Docker Compose (one command)
+
+From the repository root:
+
+```bash
+docker compose up -d --wait ai-service
+```
+
+This starts PostgreSQL, RabbitMQ, the Submission Service, **Ollama** and the AI service.
+Before the AI service starts, a one-off `ollama-pull` container downloads
+`qwen2.5-coder:7b`. That's about 4.7 GB on the first run. The model is kept in the
+`ollama-models` volume, so later starts only check it's there.
+
+| What | Where |
+|---|---|
+| AI service (direct, local debugging only) | <http://localhost:8084/docs> |
+| AI service through the gateway (`docker compose up -d gateway`) | `http://localhost:8000/api/v1/ai/...`, with `Authorization: Bearer <token>` |
+| Ollama in Compose | <http://localhost:11435> (11435, so it never clashes with a native Ollama app) |
+
+The gateway checks the login token, removes any `X-User-Id` the client sent, and
+sets the real one. It also strips the `/api/v1/ai` prefix, so
+`/api/v1/ai/submissions/{id}/feedback` reaches `/submissions/{id}/feedback` here.
+
+You can override these settings in a `.env` file at the repository root:
+
+| Variable | Default | When to change it |
+|---|---|---|
+| `AI_OLLAMA_BASE_URL` | `http://ollama:11434` | **On a Mac, set `http://host.docker.internal:11434` to use the native Ollama app.** Docker on a Mac has no GPU access, so the container is much slower. |
+| `AI_CATALOG_BASE_URL` | `http://host.docker.internal:8080` | Catalog isn't in Compose yet, so this reaches the Catalog run from the IDE. Set `http://catalog:8080` once it's in Compose. |
+| `AI_OLLAMA_MODEL` | `qwen2.5-coder:7b` | To try another model. `ollama-pull` downloads whichever model you set. |
+| `AI_SERVICE_PORT` / `OLLAMA_PORT` | `8084` / `11435` | If those host ports are taken |
+
+## Run locally (without Docker for the service)
 
 From the repository root, start PostgreSQL and RabbitMQ:
 
