@@ -1,12 +1,14 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 from threading import Thread
 from uuid import UUID
 
 import httpx
-from fastapi import FastAPI, Header, HTTPException, Response, status
+from fastapi import FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
+from . import metrics
 from .broker import consume_forever
 from .clients import ContextNotFound
 from .database import feedback_database
@@ -44,6 +46,27 @@ app = FastAPI(
     version="0.3.0",
     lifespan=lifespan,
 )
+
+for _breaker in breakers.values():
+    metrics.track_breaker(_breaker)
+
+
+@app.middleware("http")
+async def record_http_metrics(request: Request, call_next):
+    """Request count and latency per route template (/submissions/{submission_id}/feedback),
+    never per concrete URL, so IDs don't turn into separate time series."""
+    started = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        path = getattr(route, "path", "unmatched")
+        if path != "/metrics":
+            metrics.HTTP_REQUESTS.labels(request.method, path, str(status_code)).inc()
+            metrics.HTTP_LATENCY.labels(request.method, path).observe(time.perf_counter() - started)
 
 
 @app.post(
@@ -122,6 +145,13 @@ def circuit_open_response(exc: CircuitOpenError) -> JSONResponse:
             "message": f"{exc.dependency} is temporarily unavailable",
         },
     )
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics() -> Response:
+    """Scraped by Prometheus every few seconds (plain-text exposition format)."""
+    body, content_type = metrics.render()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/health", summary="Liveness probe, with each dependency's circuit state")

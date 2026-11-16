@@ -5,6 +5,7 @@ from collections.abc import Callable
 import pika
 from pydantic import ValidationError
 
+from . import metrics
 from .config import settings
 from .models import FailedVerdictEvent, normalize_verdict
 
@@ -65,6 +66,7 @@ def _on_message(process_event: Callable[[FailedVerdictEvent], object]):
         except (ValidationError, ValueError):
             # A malformed or ineligible payload cannot be fixed by retrying.
             logger.exception("rejecting invalid verdict event to the AI dead-letter queue")
+            metrics.VERDICT_REJECTED.labels("invalid").inc()
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
@@ -75,6 +77,7 @@ def _on_message(process_event: Callable[[FailedVerdictEvent], object]):
                 method.routing_key,
                 event.verdict.value,
             )
+            metrics.VERDICT_REJECTED.labels("routing_mismatch").inc()
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 

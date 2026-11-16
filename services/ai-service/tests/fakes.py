@@ -188,6 +188,13 @@ class FakeDatabase:
     def mark_unavailable(self, request_id, reason):
         self.rows[request_id].update(status="unavailable", error_reason=reason)
 
+    def status_counts(self):
+        counts = {"queued": 0, "processing": 0}
+        for r in self.rows.values():
+            if r["status"] in counts:
+                counts[r["status"]] += 1
+        return counts
+
     def pending_request_ids(self, stale_after_seconds, limit=50):
         return [r["request_id"] for r in self.rows.values() if r["status"] == "queued"][:limit]
 

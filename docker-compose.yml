@@ -100,5 +100,32 @@ services:
       submission-service:
         condition: service_healthy
 
+  # Observability: Prometheus scrapes each service's /metrics, Grafana shows the dashboards
+  # (deploy/prometheus, deploy/grafana). Grafana: http://localhost:3000, opens on the AI service dashboard.
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # reach services running on your machine (Linux; built in on Mac)
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      # Local development only: anyone can view; sign in as admin to edit.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin-local-only}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/ai-service.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+
 volumes:
   postgres-data:

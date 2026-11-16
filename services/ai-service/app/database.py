@@ -220,6 +220,17 @@ class FeedbackDatabase:
             ).fetchall()
             return [row["request_id"] for row in rows]
 
+    def status_counts(self) -> dict[str, int]:
+        """Requests still waiting, by status, for the saturation gauge."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT status, count(*) AS n FROM feedback_requests "
+                "WHERE status IN ('queued', 'processing') GROUP BY status"
+            ).fetchall()
+        counts = {"queued": 0, "processing": 0}
+        counts.update({row["status"]: row["n"] for row in rows})
+        return counts
+
     def get_request(self, request_id: UUID, user_id: str) -> dict | None:
         with self._connect() as connection:
             return connection.execute(
