@@ -55,6 +55,30 @@ These need no broker, database, Ollama or other services. Fake Submission and
 Catalog services implement the real paths, headers and JSON shapes, so the real HTTP
 clients are exercised.
 
+## Chaos tests
+
+`scripts/chaos.py` breaks the service's dependencies on purpose. It checks that
+the service degrades and recovers as designed, using real wrong-answer
+submissions:
+
+| Test | What it does | Expected |
+|---|---|---|
+| `ollama` | Stops the Ollama container while failed verdicts arrive | The Ollama circuit opens, and requests are **deferred** rather than failed. After a restart the circuit closes and every feedback becomes `ready`. |
+| `submission` | Stops the Submission Service, then asks for feedback | `502` at first, then **`503 circuit_open`** with `Retry-After`. After a restart, requests work again. |
+| `crash` | Kills the AI service in the middle of a generation | After a restart, the orphaned `processing` request is reclaimed by the sweep and completed |
+
+Run it with the whole judging path up: `docker compose up -d --wait ai-service`,
+plus Catalog, the Spawner and the Judge Worker. From the repository root:
+
+```bash
+python3 services/ai-service/scripts/chaos.py                 # all three tests
+python3 services/ai-service/scripts/chaos.py --tests crash   # one test
+```
+
+It needs only the Python standard library, and exits non-zero if any test
+fails. Keep the Grafana dashboard open while it runs to see the circuits open
+and close.
+
 ## Flow
 
 1. **Failed verdict.** The consumer binds `ai.feedback.jobs` to
@@ -73,8 +97,11 @@ clients are exercised.
      and `error_reason` says why.
    - A missing submission or problem goes straight to `unavailable`.
 3. **Crash safety.** Every `AI_SWEEP_INTERVAL_SECONDS`, a sweep re-submits `queued`
-   rows, plus `processing` rows that are older than the maximum generation time.
-   Work saved before a crash is therefore finished after the restart.
+   rows, plus `processing` rows whose heartbeat is older than
+   `AI_PROCESSING_STALE_SECONDS`. Each generation attempt refreshes the
+   heartbeat, so a request that's still being worked on is never reclaimed. One
+   whose worker died, for example because the container was killed, is put back
+   in the queue and finished after the restart.
 
 ## API
 
@@ -123,6 +150,7 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_CATALOG_BASE_URL` | `http://localhost:8080` | Catalog |
 | `AI_INTERNAL_SERVICE_TOKEN` | `local-dev-token` | Must match Catalog's `catalog.internal-token` |
 | `AI_HTTP_TIMEOUT_SECONDS` | `5` | Timeout for Submission/Catalog calls |
+| `AI_PROCESSING_STALE_SECONDS` | `180` | A `processing` request with no heartbeat for this long is put back in the queue |
 | `AI_DATABASE_URL` | `postgresql://postgres:postgres@localhost:5432/ai_feedback` | AI database |
 | `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `AI_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Installed local model name |

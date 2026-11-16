@@ -311,3 +311,13 @@ def test_unpublished_problem_uuid_is_unavailable(processor, services):
     processor.generate(row["request_id"])
     saved = processor.database.rows[row["request_id"]]
     assert saved["status"] == "unavailable" and "not a published" in saved["error_reason"]
+
+
+def test_each_attempt_sends_a_heartbeat(processor):
+    # One heartbeat per attempt keeps the sweep from reclaiming a request that is
+    # still being worked on, even across slow retries.
+    processor.ollama.failures = 2  # fails twice, succeeds on the third attempt
+    row = processor.process_failed_verdict(FailedVerdictEvent.model_validate(verdict_event()))
+    processor.generate(row["request_id"])
+    assert processor.database.rows[row["request_id"]]["status"] == "ready"
+    assert processor.database.touches == 3

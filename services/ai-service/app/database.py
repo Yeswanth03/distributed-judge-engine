@@ -201,6 +201,14 @@ class FeedbackDatabase:
                 (reason[:500], request_id),
             )
 
+    def touch(self, request_id: UUID) -> None:
+        """Heartbeat for a request being generated, so the sweep doesn't reclaim it."""
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE feedback_requests SET updated_at = now() WHERE request_id = %s AND status = 'processing'",
+                (request_id,),
+            )
+
     def pending_request_ids(self, stale_after_seconds: float, limit: int = 50) -> list[UUID]:
         """Queued requests, after returning ones stuck in processing (the process
         died mid-generation) to the queue."""

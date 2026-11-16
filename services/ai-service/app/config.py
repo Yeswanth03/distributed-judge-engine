@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # Must match catalog.internal-token on Catalog (local default "local-dev-token").
     internal_service_token: str = "local-dev-token"
     http_timeout_seconds: float = 5.0
+    # A request left in "processing" this long without a heartbeat (its worker died, e.g. the
+    # container was killed mid-generation) is put back in the queue by the sweep. Each attempt
+    # refreshes the heartbeat, so this only has to cover one attempt (the Ollama timeout) plus margin.
+    processing_stale_seconds: int = 180
 
     ollama_base_url: str = "http://localhost:11434"
     # Code-specialized model: on a real Two Sum off-by-one bug it named the cause in
