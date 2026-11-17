@@ -22,20 +22,28 @@ public class VerdictListener {
 
     private final VerdictMessageParser parser;
     private final LeaderboardService leaderboard;
+    private final MessagingMetrics metrics;
 
-    public VerdictListener(VerdictMessageParser parser, LeaderboardService leaderboard) {
+    public VerdictListener(VerdictMessageParser parser, LeaderboardService leaderboard, MessagingMetrics metrics) {
         this.parser = parser;
         this.leaderboard = leaderboard;
+        this.metrics = metrics;
     }
 
     @RabbitListener(queues = RabbitConfig.VERDICT_QUEUE)
     public void onVerdict(Message message) {
         try {
             VerdictEvent event = parser.parse(message.getBody());
-            boolean changed = leaderboard.apply(event);
+            boolean changed = metrics.applyTimer().record(() -> leaderboard.apply(event));
+            if (changed) {
+                metrics.verdictApplied(event.judgedAt());
+            } else {
+                metrics.verdictIgnored();
+            }
             log.debug("verdict {} for submission {} (rejudge {}): {}", event.verdict(), event.submissionId(),
                     event.rejudgeSeq(), changed ? "applied" : "duplicate or stale, ignored");
         } catch (InvalidVerdictException e) {
+            metrics.verdictInvalid();
             log.warn("dead-lettering verdict message: {}", e.getMessage());
             throw new AmqpRejectAndDontRequeueException(e.getMessage(), e);
         }

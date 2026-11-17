@@ -3,7 +3,8 @@
   "title": "AI Feedback Service",
   "tags": [
     "ai-service",
-    "golden-signals"
+    "golden-signals",
+    "judge-engine"
   ],
   "timezone": "browser",
   "schemaVersion": 39,

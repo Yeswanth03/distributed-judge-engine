@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.core.Message;
@@ -42,6 +43,9 @@ class VerdictListenerTest {
     @Autowired
     JdbcClient jdbc;
 
+    @Autowired
+    MeterRegistry meters;
+
     private UUID problemId;
 
     @BeforeEach
@@ -63,12 +67,18 @@ class VerdictListenerTest {
                  "verdict":"accepted","rejudge_seq":0,"judged_at":"2026-11-01T10:00:00Z","cpu_time_ms":12}
                 """.formatted(UUID.randomUUID(), problemId);
 
+        double applied = verdicts("applied");
+        double ignored = verdicts("ignored");
         publish("verdict.accepted", body);
         publish("verdict.accepted", body);
 
         waitUntil(() -> jdbc.sql("SELECT count(*) FROM results").query(Integer.class).single() == 1);
         waitUntil(() -> scoreOf("alice") == 100);
+        waitUntil(() -> verdicts("applied") + verdicts("ignored") - applied - ignored == 2);
         assertThat(jdbc.sql("SELECT count(*) FROM results").query(Integer.class).single()).isEqualTo(1);
+        assertThat(verdicts("applied") - applied).as("first delivery applied").isEqualTo(1);
+        assertThat(verdicts("ignored") - ignored).as("duplicate ignored").isEqualTo(1);
+        assertThat(meters.get("catalog.leaderboard.lag").gauge().value()).isGreaterThanOrEqualTo(0);
     }
 
     @Test
@@ -105,6 +115,10 @@ class VerdictListenerTest {
     }
 
     // ---- helpers ----
+
+    private double verdicts(String outcome) {
+        return meters.get("catalog.verdicts").tag("outcome", outcome).counter().count();
+    }
 
     private static String userEvent(long version, String displayName, String status) {
         return """
