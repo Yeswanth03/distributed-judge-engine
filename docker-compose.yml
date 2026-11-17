@@ -63,7 +63,7 @@ services:
   ai-service:
     build: ./services/ai-service
     environment:
-      AI_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/ai_feedback
+      AI_DATABASE_URL: postgresql://ai_feedback:ai_feedback@postgres:5432/ai_feedback
       AI_RABBITMQ_URL: amqp://judge:judge@rabbitmq:5672/
       AI_SUBMISSION_BASE_URL: http://submission-service:8080
       AI_CATALOG_BASE_URL: ${AI_CATALOG_BASE_URL:-http://catalog:8080}
@@ -158,8 +158,8 @@ services:
     environment:
       # The local profile, pointed at this stack; it also seeds five sample problems on first start.
       DB_URL: jdbc:postgresql://postgres:5432/catalog
-      DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_USER: catalog
+      DB_PASSWORD: catalog
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_USER: judge
       RABBITMQ_PASSWORD: judge
@@ -256,7 +256,8 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.17.1
     environment:
-      DATA_SOURCE_NAME: postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable
+      # A monitoring-only login (pg_monitor): statistics and sizes, no table data.
+      DATA_SOURCE_NAME: postgresql://exporter:exporter@postgres:5432/postgres?sslmode=disable
     depends_on:
       postgres:
         condition: service_healthy
