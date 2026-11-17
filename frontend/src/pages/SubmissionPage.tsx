@@ -1,19 +1,20 @@
 import { lazy, Suspense } from 'react'
 import { Link, useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Sparkles } from 'lucide-react'
+import { ArrowLeft, CalendarClock, Clock, ListChecks, Loader2, MemoryStick, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge } from '@/components/badges'
 import { Markdown } from '@/components/Markdown'
-import { ErrorState, Loading, PageContainer } from '@/components/states'
+import { ErrorState, Loading } from '@/components/states'
 import { errorMessage } from '@/lib/errors'
 import { ApiError } from '@/lib/api'
 import { feedback, submissions } from '@/lib/endpoints'
 import { formatDateTime, formatMemory } from '@/lib/format'
-import type { Feedback, Submission } from '@/lib/types'
 import { useProblemTitles } from '@/hooks/useProblemTitles'
+import { cn } from '@/lib/utils'
+import type { Feedback, Submission } from '@/lib/types'
 
 const CodeEditor = lazy(() => import('@/components/CodeEditor'))
 
@@ -26,45 +27,107 @@ export default function SubmissionPage() {
     refetchInterval: (q) => (q.state.data?.status === 'COMPLETED' ? false : 2000),
   })
 
-  if (submission.isPending) return <Loading />
+  if (submission.isPending) {
+    return (
+      <div className="mx-auto grid w-full max-w-6xl gap-4 px-4 py-8">
+        <Skeleton className="h-28 rounded-xl" />
+        <Skeleton className="h-96 rounded-xl" />
+      </div>
+    )
+  }
   if (submission.isError) return <ErrorState error={submission.error} title="Submission not found" />
   const s = submission.data
   const problem = titles?.get(s.problem_id)
+  const accepted = s.verdict === 'ACCEPTED'
 
   return (
-    <PageContainer wide>
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold">
-          {problem ? <Link to={`/problems/${problem.slug}`}>{problem.title}</Link> : 'Submission'}
-        </h1>
-        <StatusBadge status={s.status} verdict={s.verdict} />
-      </div>
-      <div className="mb-4 flex flex-wrap gap-6 text-sm text-muted-foreground">
-        <span>Submitted {formatDateTime(s.created_at)}</span>
-        {s.total_test_cases !== null && (
-          <span>
-            {s.test_cases_passed} / {s.total_test_cases} test cases
-          </span>
+    <div className="mx-auto w-full max-w-6xl px-4 py-8">
+      <Link
+        to="/submissions"
+        className="mb-4 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-4" /> My submissions
+      </Link>
+
+      <div
+        className={cn(
+          'mb-4 rounded-xl border p-5 shadow-sm',
+          s.status !== 'COMPLETED'
+            ? 'bg-card'
+            : accepted
+              ? 'border-success/30 bg-success/6'
+              : 'border-danger/30 bg-danger/5',
         )}
-        {s.execution_time_ms !== null && <span>{s.execution_time_ms} ms</span>}
-        <span>{formatMemory(s.memory_kb)}</span>
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <StatusBadge status={s.status} verdict={s.verdict} />
+            <h1 className="mt-1 text-xl font-semibold tracking-tight">
+              {problem ? (
+                <Link to={`/problems/${problem.slug}`} className="hover:text-brand">
+                  {problem.title}
+                </Link>
+              ) : (
+                'Submission'
+              )}
+            </h1>
+          </div>
+          {problem && (
+            <Button variant="outline" size="sm" asChild>
+              <Link to={`/problems/${problem.slug}`}>Open problem</Link>
+            </Button>
+          )}
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Fact
+            Icon={ListChecks}
+            label="Test cases"
+            value={s.total_test_cases !== null ? `${s.test_cases_passed} / ${s.total_test_cases}` : '—'}
+          />
+          <Fact
+            Icon={Clock}
+            label="Runtime"
+            value={s.execution_time_ms !== null ? `${s.execution_time_ms} ms` : '—'}
+          />
+          <Fact Icon={MemoryStick} label="Memory" value={formatMemory(s.memory_kb)} />
+          <Fact Icon={CalendarClock} label="Submitted" value={formatDateTime(s.created_at)} />
+        </div>
+        {s.error_message && (
+          <pre className="mt-4 overflow-x-auto rounded-lg bg-danger/8 px-3 py-2 font-mono text-[13px] text-danger">
+            {s.error_message}
+          </pre>
+        )}
       </div>
-      {s.error_message && (
-        <pre className="mb-4 overflow-x-auto rounded bg-muted p-3 text-sm text-rose-600">
-          {s.error_message}
-        </pre>
-      )}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="overflow-hidden py-0">
+
+      <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
+        <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+          <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2.5 text-sm">
+            <span className="font-medium">Code</span>
+            <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+              Python 3
+            </span>
+          </div>
           <div className="h-[28rem]">
             <Suspense fallback={<Loading label="Loading code…" />}>
               <CodeEditor value={s.code ?? ''} readOnly />
             </Suspense>
           </div>
-        </Card>
+        </div>
         <FeedbackCard submission={s} />
       </div>
-    </PageContainer>
+    </div>
+  )
+}
+
+function Fact({ Icon, label, value }: { Icon: typeof Clock; label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-background/60 p-3">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Icon className="size-3.5" />
+        {label}
+      </div>
+      <div className="mt-1 truncate font-semibold tabular-nums">{value}</div>
+    </div>
   )
 }
 
@@ -99,16 +162,17 @@ function FeedbackCard({ submission }: { submission: Submission }) {
 
   const f = current.data
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Sparkles className="size-4" /> AI feedback
-        </CardTitle>
-        <CardDescription>
-          Hints on your code. The verdict always comes from the judge, never from the AI.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
+    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="flex items-center gap-2 border-b bg-gradient-to-r from-brand-soft to-transparent px-4 py-2.5">
+        <span className="grid size-6 place-items-center rounded-md bg-brand-soft text-brand">
+          <Sparkles className="size-3.5" />
+        </span>
+        <span className="text-sm font-medium">AI hints</span>
+      </div>
+      <div className="p-4">
+        <p className="mb-4 text-xs text-muted-foreground">
+          Hints about your code. The verdict always comes from the judge's tests, never from the AI.
+        </p>
         {!judged ? (
           <p className="text-sm text-muted-foreground">Available once the submission is judged.</p>
         ) : current.isPending ? (
@@ -117,18 +181,18 @@ function FeedbackCard({ submission }: { submission: Submission }) {
           <ErrorState error={current.error} />
         ) : f === null || f === undefined ? (
           <Button onClick={() => request.mutate()} disabled={request.isPending}>
-            {request.isPending && <Loader2 className="animate-spin" />} Get feedback
+            {request.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Get hints
           </Button>
         ) : f.status === 'ready' && f.feedback ? (
           <Markdown>{f.feedback}</Markdown>
         ) : f.status === 'unavailable' ? (
           <p className="text-sm text-muted-foreground">
-            Feedback is unavailable{f.error_reason ? `: ${f.error_reason}` : '.'}
+            Hints are unavailable right now{f.error_reason ? ` (${f.error_reason})` : ''}.
           </p>
         ) : (
-          <Loading label="Generating feedback…" />
+          <Loading label="Thinking about your code…" />
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }
