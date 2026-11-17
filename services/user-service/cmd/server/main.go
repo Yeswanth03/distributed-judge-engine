@@ -108,9 +108,10 @@ func run(cfg config.Config, log *slog.Logger) error {
 			{Name: "database", Check: repo.Ping},
 			{Name: "broker", Check: mq.Check},
 		},
-		Providers:        providers(cfg, log),
-		AllowedRedirects: cfg.OAuthAllowedRedirects,
-		Logger:           log,
+		Providers:           providers(cfg, log),
+		AllowedRedirects:    cfg.OAuthAllowedRedirects,
+		RefreshCookieSecure: cfg.RefreshCookieSecure,
+		Logger:              log,
 	})
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,

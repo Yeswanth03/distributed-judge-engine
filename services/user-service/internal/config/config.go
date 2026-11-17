@@ -52,6 +52,10 @@ type Config struct {
 	// Origins a sign-in may send the browser back to (no open redirects).
 	OAuthAllowedRedirects []string
 
+	// Whether the refresh-token cookie is marked Secure (sent over HTTPS only). Off by default in the local profile,
+	// where the stack runs on plain http://localhost.
+	RefreshCookieSecure bool
+
 	CORSOrigin      string
 	ShutdownTimeout time.Duration
 }
@@ -105,6 +109,8 @@ func Load() (Config, error) {
 		GitHubClientSecret:    r.fileOrValue("GITHUB_CLIENT_SECRET"),
 		PublicBaseURL:         strings.TrimRight(r.str("PUBLIC_BASE_URL", "http://localhost:8000"), "/"),
 		OAuthAllowedRedirects: r.list("OAUTH_ALLOWED_REDIRECTS", "http://localhost:5500,http://localhost:8000"),
+
+		RefreshCookieSecure: r.boolean("REFRESH_COOKIE_SECURE", !local),
 
 		CORSOrigin:      r.str("CORS_ORIGIN", ""),
 		ShutdownTimeout: r.duration("SHUTDOWN_TIMEOUT", 15*time.Second),
@@ -178,6 +184,18 @@ func (r *reader) integer(key string, def int) int {
 		r.errs = append(r.errs, fmt.Sprintf("%s: %q is not an integer", key, v))
 	}
 	return n
+}
+
+func (r *reader) boolean(key string, def bool) bool {
+	v := r.str(key, "")
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		r.errs = append(r.errs, fmt.Sprintf("%s: %q is not true or false", key, v))
+	}
+	return b
 }
 
 func (r *reader) duration(key string, def time.Duration) time.Duration {

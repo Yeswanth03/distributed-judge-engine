@@ -257,7 +257,7 @@ func (h *Handler) oauthExchange(w http.ResponseWriter, r *http.Request) {
 		h.internalError(w, r, "issue token", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, resp)
+	h.writeTokens(w, r, http.StatusOK, resp)
 }
 
 // allowedRedirect accepts an absolute http(s) URL whose origin is on the allow list.

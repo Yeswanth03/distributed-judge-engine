@@ -60,7 +60,9 @@ type Options struct {
 	// sign-in may send the browser back to.
 	Providers        map[string]oauth.Provider
 	AllowedRedirects []string
-	Logger           *slog.Logger
+	// RefreshCookieSecure marks the refresh-token cookie Secure (HTTPS only).
+	RefreshCookieSecure bool
+	Logger              *slog.Logger
 }
 
 type Handler struct {
