@@ -1,14 +1,65 @@
-# Prometheus scrapes (pulls) /metrics from each service. A target that stops answering
-# shows as down instead of silently going quiet.
+# Prometheus scrapes (pulls) metrics from every service inside Docker Compose. A target that stops answering
+# shows as down instead of silently going quiet. Dashboards: deploy/grafana/dashboards.
 global:
-  scrape_interval: 5s      # short, so the dashboard reacts within seconds during a demo
+  scrape_interval: 5s      # short, so the dashboards react within seconds during a demo
   evaluation_interval: 5s
 
 scrape_configs:
+  # ---- application services ----
+  - job_name: catalog
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: [catalog:8080]
+
+  - job_name: submission-service
+    static_configs:
+      - targets: [submission-service:8080]
+
+  - job_name: user-service
+    static_configs:
+      - targets: [user-service:8080]
+
   - job_name: ai-service
+    static_configs:
+      - targets: [ai-service:8084]
+
+  - job_name: spawner
+    static_configs:
+      - targets: [spawner:8081]
+
+  # Every judge-worker replica, found through Docker's DNS, so scaling the pool needs no change here.
+  - job_name: judge-worker
+    dns_sd_configs:
+      - names: [judge-worker]
+        type: A
+        port: 8083
+        refresh_interval: 15s
+
+  # ---- infrastructure ----
+  - job_name: gateway
+    metrics_path: /stats/prometheus
+    static_configs:
+      - targets: [gateway:9902]
+
+  # Per-queue depth, rates and consumers (the default /metrics endpoint only has broker-wide totals).
+  - job_name: rabbitmq
+    metrics_path: /metrics/detailed
+    params:
+      family: [queue_coarse_metrics, queue_consumer_count, queue_delivery_metrics, exchange_metrics]
+    static_configs:
+      - targets: [rabbitmq:15692]
+
+  - job_name: rabbitmq-overview
     metrics_path: /metrics
     static_configs:
-      - targets:
-          - ai-service:8084            # the AI service running in Docker Compose
-          - host.docker.internal:8084  # the AI service running on your machine (local development)
-        # Only one of the two is normally up; the dashboard adds them together.
+      - targets: [rabbitmq:15692]
+
+  - job_name: postgres
+    static_configs:
+      - targets: [postgres-exporter:9187]
+
+  # Running a service from your IDE instead of Compose? Point a job at it through the host, e.g.:
+  # - job_name: catalog-local
+  #   metrics_path: /actuator/prometheus
+  #   static_configs:
+  #     - targets: [host.docker.internal:8080]

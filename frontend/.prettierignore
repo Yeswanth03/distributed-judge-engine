@@ -2,3 +2,5 @@ node_modules
 dist
 src/components/ui
 package-lock.json
+nginx.conf.template
+Dockerfile
