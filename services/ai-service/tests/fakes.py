@@ -222,7 +222,8 @@ class FakeOllama:
         self.down = False
         self.breaker = new_breaker("ollama", **({"clock": clock} if clock else {}))
 
-    def generate_feedback(self, context):
+    def generate_feedback(self, context, timeout=None):
+        self.last_timeout = timeout
         return self.breaker.call(lambda: self._generate(context))
 
     def _generate(self, context):

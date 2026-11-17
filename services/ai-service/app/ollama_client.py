@@ -166,11 +166,11 @@ class OllamaClient:
     def __init__(self, breaker: CircuitBreaker | None = None) -> None:
         self.breaker = breaker or breakers["ollama"]
 
-    def generate_feedback(self, context: FeedbackContext) -> GeneratedFeedback:
+    def generate_feedback(self, context: FeedbackContext, timeout: float | None = None) -> GeneratedFeedback:
         """Raises CircuitOpenError without calling Ollama while its circuit is open."""
-        return self.breaker.call(lambda: self._generate(context))
+        return self.breaker.call(lambda: self._generate(context, timeout))
 
-    def _generate(self, context: FeedbackContext) -> GeneratedFeedback:
+    def _generate(self, context: FeedbackContext, timeout: float | None = None) -> GeneratedFeedback:
         response = httpx.post(
             f"{settings.ollama_base_url.rstrip('/')}/api/generate",
             json={
@@ -185,7 +185,7 @@ class OllamaClient:
                     "num_ctx": settings.ollama_num_ctx,
                 },
             },
-            timeout=settings.ollama_timeout_seconds,
+            timeout=timeout or settings.ollama_timeout_seconds,
         )
         response.raise_for_status()
         payload = response.json()

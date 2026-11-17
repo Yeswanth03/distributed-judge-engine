@@ -231,6 +231,7 @@ service must only be reachable through it.
 | Method | Path | Result |
 |---|---|---|
 | `POST` | `/submissions/{submission_id}/feedback` | `202` with a `queued`/`processing` request, or `200` if feedback is already `ready`. No body. |
+| `POST` | `/submissions/{submission_id}/feedback/direct` | **Accepted submissions only.** Calls the model inside the request: `200` with the hints. Falls back to the background queue (`202`) if the model is too slow or its circuit is open. Anything not accepted gets `409`; use the endpoint above. |
 | `GET` | `/feedback-requests/{request_id}` | Status and feedback of one request |
 | `GET` | `/submissions/{submission_id}/feedback` | The latest request for the submission |
 | `GET` | `/health` | Liveness, plus each dependency's circuit state |
@@ -280,6 +281,7 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_OLLAMA_TEMPERATURE` | `0.2` | Low, so hints are focused and repeatable |
 | `AI_OLLAMA_NUM_CTX` | `4096` | Context window (prompts are about 700 tokens) |
 | `AI_OLLAMA_KEEP_ALIVE` | `30m` | How long Ollama keeps the model loaded after the last request, so the next hint skips a 4.5 GB reload |
+| `AI_DIRECT_TIMEOUT_SECONDS` | `12` | Direct hints (accepted submissions): longest wait for the model inside the request, under the gateway's 15 s. Slower than this, the request continues in the background (`202`). |
 | `AI_PROMPT_VERSION` | `5` | Prompt version stored with each response |
 | `AI_GENERATION_WORKERS` | `2` | Concurrent generations |
 | `AI_GENERATION_ATTEMPTS` | `3` | Attempts per request on transient failures |

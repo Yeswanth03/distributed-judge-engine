@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # How long Ollama keeps the model in memory after the last request, so the next hint
     # doesn't wait for a 4.5 GB reload (Ollama's default unloads it after 5 idle minutes).
     ollama_keep_alive: str = "30m"
+    # Direct hints (accepted submissions): the model is called inside the HTTP request, so it
+    # must answer before the gateway gives up (15 s for /api/v1/ai/*). Slower than this, the
+    # request falls back to the background queue and the client polls as usual.
+    direct_timeout_seconds: float = 12.0
     prompt_version: str = "5"
 
     # Background generation: worker threads, attempts per request for transient
