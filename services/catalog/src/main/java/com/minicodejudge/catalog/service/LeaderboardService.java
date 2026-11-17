@@ -51,7 +51,8 @@ public class LeaderboardService {
     public Leaderboard top(int limit) {
         Optional<Freshness> freshness = repo.latestApplied();
         List<LeaderboardEntry> entries = repo.top(limit).stream()
-                .map(r -> new LeaderboardEntry(r.rank(), r.userId(), r.score(), r.solvedCount()))
+                .map(r -> new LeaderboardEntry(r.rank(), r.userId(), r.username(), r.displayName(), r.score(),
+                        r.solvedCount()))
                 .toList();
         return new Leaderboard(asOf(freshness), lagSeconds(freshness), entries);
     }
@@ -60,7 +61,8 @@ public class LeaderboardService {
         Standing s = repo.standing(userId)
                 .orElseThrow(() -> new NotFoundException("no verdicts recorded for this user"));
         Optional<Freshness> freshness = repo.latestApplied();
-        return new UserStanding(s.userId(), s.rank(), s.score(), s.solvedCount(), repo.solvedProblemIds(userId),
+        return new UserStanding(s.userId(), s.username(), s.displayName(), s.rank(), s.score(), s.solvedCount(),
+                repo.solvedProblemIds(userId),
                 asOf(freshness), lagSeconds(freshness));
     }
 

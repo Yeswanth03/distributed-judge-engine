@@ -22,6 +22,11 @@ public class RabbitConfig {
     public static final String DEAD_LETTER_EXCHANGE = "verdicts.dlx";
     public static final String DEAD_LETTER_QUEUE = "catalog.verdicts.dlq";
 
+    /** User Service events (docs/contracts.md section 7); every one carries the user's full public state. */
+    public static final String USER_EXCHANGE = "users";
+    public static final String USER_QUEUE = "catalog.users";
+    public static final String USER_DEAD_LETTER_QUEUE = "catalog.users.dlq";
+
     @Bean
     TopicExchange verdictExchange() {
         return new TopicExchange(VERDICT_EXCHANGE, true, false);
@@ -53,5 +58,36 @@ public class RabbitConfig {
     @Bean
     Binding deadLetterBinding(Queue deadLetterQueue, DirectExchange deadLetterExchange) {
         return BindingBuilder.bind(deadLetterQueue).to(deadLetterExchange).with(VERDICT_QUEUE);
+    }
+
+    // ---- user events: same shape as verdicts, and also declared in deploy/rabbitmq/definitions.json so no event
+    // is lost while Catalog is down. The arguments must match that file exactly.
+
+    @Bean
+    TopicExchange userExchange() {
+        return new TopicExchange(USER_EXCHANGE, true, false);
+    }
+
+    @Bean
+    Queue userQueue() {
+        return QueueBuilder.durable(USER_QUEUE)
+                .deadLetterExchange(DEAD_LETTER_EXCHANGE)
+                .deadLetterRoutingKey(USER_QUEUE)
+                .build();
+    }
+
+    @Bean
+    Queue userDeadLetterQueue() {
+        return QueueBuilder.durable(USER_DEAD_LETTER_QUEUE).build();
+    }
+
+    @Bean
+    Binding userBinding(Queue userQueue, TopicExchange userExchange) {
+        return BindingBuilder.bind(userQueue).to(userExchange).with("user.#");
+    }
+
+    @Bean
+    Binding userDeadLetterBinding(Queue userDeadLetterQueue, DirectExchange deadLetterExchange) {
+        return BindingBuilder.bind(userDeadLetterQueue).to(deadLetterExchange).with(USER_QUEUE);
     }
 }

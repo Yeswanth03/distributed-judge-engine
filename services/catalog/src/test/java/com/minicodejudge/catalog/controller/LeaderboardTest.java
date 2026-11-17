@@ -51,7 +51,7 @@ class LeaderboardTest {
 
     @BeforeEach
     void seedTwoProblems() {
-        jdbc.sql("TRUNCATE results, user_problem_status, user_scores, test_cases, testsets, problems").update();
+        jdbc.sql("TRUNCATE results, user_problem_status, user_scores, user_profiles, test_cases, testsets, problems").update();
         easy = problem("easy-one", 100);
         hard = problem("hard-one", 300);
     }
@@ -170,7 +170,39 @@ class LeaderboardTest {
                 .andExpect(jsonPath("$.error").value("not_found"));
     }
 
+    @Test
+    void leaderboardShowsNamesAndLeavesDisabledAccountsOut() throws Exception {
+        leaderboard.apply(verdict(UUID.randomUUID(), "bob", hard, "accepted", 0, T0));     // 300, but disabled
+        leaderboard.apply(verdict(UUID.randomUUID(), "alice", easy, "accepted", 0, T0));   // 100
+        leaderboard.apply(verdict(UUID.randomUUID(), "carol", easy, "accepted", 0, T0.plusSeconds(5))); // no profile yet
+        profile("alice", "ada", "Ada L.", "active");
+        profile("bob", "bob", "", "disabled");
+
+        mvc.perform(get("/leaderboard"))
+                .andExpect(jsonPath("$.entries", hasSize(2)))
+                .andExpect(jsonPath("$.entries[0].user_id").value("alice"))
+                .andExpect(jsonPath("$.entries[0].rank").value(1))
+                .andExpect(jsonPath("$.entries[0].username").value("ada"))
+                .andExpect(jsonPath("$.entries[0].display_name").value("Ada L."))
+                .andExpect(jsonPath("$.entries[1].user_id").value("carol"))
+                .andExpect(jsonPath("$.entries[1].username").value(nullValue()));
+        mvc.perform(get("/leaderboard/users/bob"))
+                .andExpect(jsonPath("$.rank").value(nullValue()))
+                .andExpect(jsonPath("$.score").value(300));
+        mvc.perform(get("/leaderboard/users/alice")).andExpect(jsonPath("$.rank").value(1));
+    }
+
     // ---- helpers ----
+
+    private void profile(String userId, String username, String displayName, String status) {
+        jdbc.sql("""
+                INSERT INTO user_profiles (user_id, username, display_name, status, version)
+                VALUES (:id, :username, :displayName, :status, 1)
+                """)
+                .param("id", userId).param("username", username).param("displayName", displayName)
+                .param("status", status)
+                .update();
+    }
 
     private UUID problem(String slug, int points) {
         UUID id = UUID.randomUUID();

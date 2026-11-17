@@ -110,45 +110,58 @@ public class LeaderboardRepository {
                 .optional();
     }
 
-    public record Ranked(int rank, String userId, int score, int solvedCount) {}
+    public record Ranked(
+            int rank, String userId, @Nullable String username, @Nullable String displayName, int score, int solvedCount) {}
 
     /**
      * Users with at least one solve, best first. Equal score: whoever reached it earlier ranks higher; users
-     * equal on both share a rank. user_id only makes the listing order stable.
+     * equal on both share a rank. user_id only makes the listing order stable. Disabled accounts are left out
+     * (their scores stay stored); names are null for a user Catalog hasn't heard about yet.
      */
     public List<Ranked> top(int limit) {
         return jdbc.sql("""
-                SELECT user_id, score, solved_count,
-                       RANK() OVER (ORDER BY score DESC, last_solved_at ASC) AS rank
-                  FROM user_scores
-                 WHERE solved_count > 0
-                 ORDER BY score DESC, last_solved_at ASC, user_id ASC
+                SELECT s.user_id, p.username, p.display_name, s.score, s.solved_count,
+                       RANK() OVER (ORDER BY s.score DESC, s.last_solved_at ASC) AS rank
+                  FROM user_scores s
+                  LEFT JOIN user_profiles p ON p.user_id = s.user_id
+                 WHERE s.solved_count > 0
+                   AND p.status IS DISTINCT FROM 'disabled'
+                 ORDER BY s.score DESC, s.last_solved_at ASC, s.user_id ASC
                  LIMIT :limit
                 """)
                 .param("limit", limit)
                 .query((rs, rowNum) -> new Ranked(
-                        rs.getInt("rank"), rs.getString("user_id"), rs.getInt("score"), rs.getInt("solved_count")))
+                        rs.getInt("rank"), rs.getString("user_id"), rs.getString("username"),
+                        rs.getString("display_name"), rs.getInt("score"), rs.getInt("solved_count")))
                 .list();
     }
 
-    public record Standing(String userId, @Nullable Integer rank, int score, int solvedCount) {}
+    public record Standing(
+            String userId, @Nullable String username, @Nullable String displayName, @Nullable Integer rank, int score,
+            int solvedCount) {}
 
-    /** One user's score and rank (null rank until their first solve), or empty if no verdict was ever received. */
+    /**
+     * One user's score and rank, or empty if no verdict was ever received. The rank is null until their first solve,
+     * and for a disabled account, which the leaderboard leaves out; disabled accounts never count against others.
+     */
     public Optional<Standing> standing(String userId) {
         return jdbc.sql("""
-                SELECT u.user_id, u.score, u.solved_count,
-                       CASE WHEN u.solved_count = 0 THEN NULL ELSE
+                SELECT u.user_id, p.username, p.display_name, u.score, u.solved_count,
+                       CASE WHEN u.solved_count = 0 OR p.status = 'disabled' THEN NULL ELSE
                          (1 + (SELECT count(*) FROM user_scores o
+                                 LEFT JOIN user_profiles op ON op.user_id = o.user_id
                                 WHERE o.solved_count > 0
+                                  AND op.status IS DISTINCT FROM 'disabled'
                                   AND (o.score > u.score OR (o.score = u.score AND o.last_solved_at < u.last_solved_at))))::int
                        END AS rank
                   FROM user_scores u
+                  LEFT JOIN user_profiles p ON p.user_id = u.user_id
                  WHERE u.user_id = :userId
                 """)
                 .param("userId", userId)
                 .query((rs, rowNum) -> new Standing(
-                        rs.getString("user_id"), rs.getObject("rank", Integer.class),
-                        rs.getInt("score"), rs.getInt("solved_count")))
+                        rs.getString("user_id"), rs.getString("username"), rs.getString("display_name"),
+                        rs.getObject("rank", Integer.class), rs.getInt("score"), rs.getInt("solved_count")))
                 .optional();
     }
 
