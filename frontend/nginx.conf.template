@@ -1,0 +1,51 @@
+# Serves the built app and proxies the API, the same contract as the Vite dev proxy (vite.config.ts):
+# the app calls /api/<gateway path>; nginx strips /api and forwards to the gateway.
+
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header X-Frame-Options DENY always;
+
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    location /api/ {
+        proxy_pass ${GATEWAY_URL}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        # The User Service scopes its refresh cookie to /auth; the browser requests it as /api/auth.
+        proxy_cookie_path /auth /api/auth;
+        # Live submission status is Server-Sent Events: pass every event through at once and keep the stream open.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        client_max_body_size 8m;
+    }
+
+    # Built files have content hashes in their names, so they can be cached for good.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header X-Content-Type-Options nosniff always;
+        try_files $uri =404;
+    }
+
+    # Everything else is a page of the single-page app.
+    location / {
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+        add_header X-Frame-Options DENY always;
+        try_files $uri /index.html;
+    }
+}

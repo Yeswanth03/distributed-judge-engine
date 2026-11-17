@@ -1,6 +1,6 @@
 # Local development stack: every service, behind the gateway.
 #   docker compose up -d --build
-#   Gateway (the only entry point): http://localhost:8000
+#   App: http://localhost:5500 · Gateway (the only entry point for APIs): http://localhost:8000
 #   RabbitMQ UI: http://localhost:15672 (judge / judge)
 # The first start downloads the AI model (about 4.7 GB) into the ollama-models volume; until then AI feedback
 # waits. Ports already in use on your machine: override them in .env (POSTGRES_PORT, CATALOG_PORT, ...).
@@ -231,6 +231,15 @@ services:
         condition: service_healthy
       submission-service:
         condition: service_healthy
+
+  # The web app: nginx serves the built frontend and proxies /api to the gateway. http://localhost:5500
+  # (5500 is already allowed as a sign-in return page). Stop `npm run dev` or set FRONTEND_PORT if both run.
+  frontend:
+    build: ./frontend
+    ports:
+      - "${FRONTEND_PORT:-5500}:80"
+    depends_on:
+      - gateway
 
   # Observability: Prometheus scrapes each service's /metrics, Grafana shows the dashboards
   # (deploy/prometheus, deploy/grafana). Grafana: http://localhost:3000, opens on the AI service dashboard.
