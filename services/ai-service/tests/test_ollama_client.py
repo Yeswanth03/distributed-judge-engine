@@ -46,7 +46,7 @@ def test_request_caps_output_and_keeps_the_model_loaded(context, ollama):
 
 
 def test_defaults_are_tuned_for_short_focused_hints():
-    assert settings.ollama_num_predict == 300  # ~150 words asked for in the prompt, plus margin
+    assert settings.ollama_num_predict == 200  # 2-4 hints (~100 words) asked for in the prompt, plus margin
     assert settings.ollama_temperature <= 0.3
     assert settings.ollama_num_ctx == 4096
     assert settings.ollama_keep_alive == "30m"
@@ -75,3 +75,38 @@ def test_an_answer_cut_by_the_cap_ends_cleanly(context, ollama):
 ])
 def test_trim_cut_off(text, expected):
     assert trim_cut_off(text) == expected
+
+
+# ---- hints only ----
+
+def test_prompt_asks_for_hints_only():
+    from app.ollama_client import SYSTEM_PROMPT
+    text = SYSTEM_PROMPT.lower()
+    assert "hints only" in text and "no code blocks" in text and "even if" in text
+
+
+def test_code_blocks_are_removed_from_the_answer(context, ollama):
+    _, reply = ollama
+    reply["response"] = (
+        "- Look at what `twoSum` returns for the first sample.\n"
+        "- Here is a fix:\n"
+        "```python\nclass Solution:\n    def twoSum(self, nums, target):\n        return [2, 3]\n```\n"
+        "- Which indices add up to the target?"
+    )
+    text = OllamaClient().generate_feedback(context).text
+    assert "```" not in text and "class Solution" not in text and "return [2, 3]" not in text
+    assert "`twoSum`" in text and "Which indices add up to the target?" in text
+
+
+def test_an_unclosed_code_block_at_a_cut_is_removed(context, ollama):
+    _, reply = ollama
+    reply.update(response="- Check the loop bounds before the return statement.\n```python\nfor i in range(len(nums)):\n    for j",
+                 done_reason="length")
+    assert OllamaClient().generate_feedback(context).text == "- Check the loop bounds before the return statement."
+
+
+def test_an_answer_that_is_only_code_is_rejected(context, ollama):
+    _, reply = ollama
+    reply["response"] = "```python\nreturn [0, 1]\n```"
+    with pytest.raises(ValueError):  # treated like a bad response: retried, then unavailable
+        OllamaClient().generate_feedback(context)
