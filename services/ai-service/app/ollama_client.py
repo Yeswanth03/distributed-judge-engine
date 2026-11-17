@@ -77,6 +77,17 @@ def _fence(text: str, tag: str) -> str:
     return text.replace(f"</{tag}>", f"<\\/{tag}>")
 
 
+def trim_cut_off(text: str) -> str:
+    """Ends text cut off by the output cap at its last complete line or sentence, so a
+    hint never stops mid-word. If nothing complete is left in the second half, mark the
+    cut with an ellipsis instead of throwing most of the answer away."""
+    text = text.rstrip()
+    cut = max(text.rfind("\n"), text.rfind(". "), text.rfind("? "), text.rfind("! "))
+    if cut >= len(text) // 2:
+        return text[: cut + 1].rstrip()
+    return text + "…"
+
+
 def build_prompt(context: FeedbackContext) -> str:
     """Only sample test cases ever reach the model. A hidden case is described by
     its number alone, never by its input or expected output."""
@@ -147,6 +158,12 @@ class OllamaClient:
                 "system": SYSTEM_PROMPT,
                 "prompt": build_prompt(context),
                 "stream": False,
+                "keep_alive": settings.ollama_keep_alive,
+                "options": {
+                    "num_predict": settings.ollama_num_predict,
+                    "temperature": settings.ollama_temperature,
+                    "num_ctx": settings.ollama_num_ctx,
+                },
             },
             timeout=settings.ollama_timeout_seconds,
         )
@@ -155,6 +172,8 @@ class OllamaClient:
         feedback = payload.get("response")
         if not isinstance(feedback, str) or not feedback.strip():
             raise ValueError("Ollama returned an empty feedback response")
+        if payload.get("done_reason") == "length":
+            feedback = trim_cut_off(feedback)  # stopped by the num_predict cap
         return GeneratedFeedback(
             text=feedback.strip(),
             input_tokens=payload.get("prompt_eval_count"),

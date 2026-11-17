@@ -276,7 +276,11 @@ All settings use the `AI_` environment-variable prefix.
 | `AI_OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server |
 | `AI_OLLAMA_MODEL` | `qwen2.5-coder:7b` | Installed local model name |
 | `AI_OLLAMA_TIMEOUT_SECONDS` | `120` | Ollama request timeout |
-| `AI_PROMPT_VERSION` | `3` | Prompt version stored with each response |
+| `AI_OLLAMA_NUM_PREDICT` | `300` | Hard cap on output tokens. Output length drives latency; an answer cut by the cap is trimmed to its last complete line or sentence. |
+| `AI_OLLAMA_TEMPERATURE` | `0.2` | Low, so hints are focused and repeatable |
+| `AI_OLLAMA_NUM_CTX` | `4096` | Context window (prompts are about 700 tokens) |
+| `AI_OLLAMA_KEEP_ALIVE` | `30m` | How long Ollama keeps the model loaded after the last request, so the next hint skips a 4.5 GB reload |
+| `AI_PROMPT_VERSION` | `4` | Prompt version stored with each response |
 | `AI_GENERATION_WORKERS` | `2` | Concurrent generations |
 | `AI_GENERATION_ATTEMPTS` | `3` | Attempts per request on transient failures |
 | `AI_SWEEP_INTERVAL_SECONDS` | `30` | How often queued/stuck requests are resumed |

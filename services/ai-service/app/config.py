@@ -31,7 +31,17 @@ class Settings(BaseSettings):
     # 3/3 runs, where llama3.2 gave wrong advice in every run. About 4.7 GB.
     ollama_model: str = "qwen2.5-coder:7b"
     ollama_timeout_seconds: float = 120.0
-    prompt_version: str = "3"
+    # Generation settings sent with every request. The model writes one token at a time, so
+    # output length drives latency: num_predict is a hard cap (the prompt asks for ~150 words,
+    # about 200 tokens; 300 leaves margin). Low temperature keeps hints focused and repeatable.
+    # Prompts are ~700 tokens, so a 4096-token context is plenty (Ollama's default here was 8192).
+    ollama_num_predict: int = 300
+    ollama_temperature: float = 0.2
+    ollama_num_ctx: int = 4096
+    # How long Ollama keeps the model in memory after the last request, so the next hint
+    # doesn't wait for a 4.5 GB reload (Ollama's default unloads it after 5 idle minutes).
+    ollama_keep_alive: str = "30m"
+    prompt_version: str = "4"
 
     # Background generation: worker threads, attempts per request for transient
     # failures, and how often queued/stuck requests are picked up again.
