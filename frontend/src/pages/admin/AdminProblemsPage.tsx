@@ -48,44 +48,46 @@ export default function AdminProblemsPage() {
         <ErrorState error={list.error} />
       ) : (
         <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Title</TableHead>
-                <TableHead>Slug</TableHead>
-                <TableHead>Difficulty</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Test set</TableHead>
-                <TableHead className="text-right">Updated</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {list.data.pages
-                .flatMap((p) => p.items)
-                .map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell>
-                      <Link to={`/admin/problems/${p.id}`} className="font-medium hover:underline">
-                        {p.title}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{p.slug}</TableCell>
-                    <TableCell>
-                      <DifficultyLabel difficulty={p.difficulty} />
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={p.status === 'published' ? 'default' : 'secondary'}>{p.status}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {p.current_version !== null ? `v${p.current_version}` : '—'}
-                    </TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {formatRelative(p.updated_at)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
+          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Slug</TableHead>
+                  <TableHead>Difficulty</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Test set</TableHead>
+                  <TableHead className="text-right">Updated</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {list.data.pages
+                  .flatMap((p) => p.items)
+                  .map((p) => (
+                    <TableRow key={p.id}>
+                      <TableCell>
+                        <Link to={`/admin/problems/${p.id}`} className="font-medium hover:underline">
+                          {p.title}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{p.slug}</TableCell>
+                      <TableCell>
+                        <DifficultyLabel difficulty={p.difficulty} />
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={p.status === 'published' ? 'default' : 'secondary'}>{p.status}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {p.current_version !== null ? `v${p.current_version}` : '—'}
+                      </TableCell>
+                      <TableCell className="text-right text-muted-foreground">
+                        {formatRelative(p.updated_at)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
           {list.hasNextPage && (
             <div className="mt-4 flex justify-center">
               <Button

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { BrandMark } from '@/components/brand'
 import { apiUrl } from '@/lib/api'
 import { auth } from '@/lib/endpoints'
 import { oauthReturnUrl } from '@/lib/oauth'
@@ -98,14 +99,35 @@ export function AuthCard({
   children: ReactNode
 }) {
   return (
-    <div className="flex flex-1 items-start justify-center p-6 pt-16">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle className="text-xl">{title}</CardTitle>
-          <CardDescription>{description}</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">{children}</CardContent>
-      </Card>
+    <div className="grid flex-1 lg:grid-cols-2">
+      <div className="relative hidden overflow-hidden border-r bg-brand-glow lg:flex lg:flex-col lg:justify-between lg:p-12">
+        <div className="pointer-events-none absolute inset-0 bg-grid opacity-50" />
+        <BrandMark className="relative size-10" />
+        <div className="relative space-y-6">
+          <h2 className="text-3xl font-bold tracking-tight text-balance">
+            Solve problems. <span className="text-brand">Get judged</span> on hidden tests.
+          </h2>
+          <ul className="grid gap-3 text-sm text-muted-foreground">
+            {[
+              'Live verdicts streamed straight from the judge',
+              'Fair CPU-time and memory limits on every test case',
+              'A leaderboard that updates within seconds',
+            ].map((t) => (
+              <li key={t} className="flex items-center gap-2">
+                <CheckCircle2 className="size-4 text-success" /> {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <p className="relative text-xs text-muted-foreground">Mini Code Judge · COMP41720</p>
+      </div>
+      <div className="flex items-start justify-center p-6 pt-12 lg:items-center lg:pt-6">
+        <div className="w-full max-w-sm animate-in fade-in-0 slide-in-from-bottom-2 duration-500">
+          <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+          <p className="mt-1 mb-6 text-sm text-muted-foreground">{description}</p>
+          <div className="grid gap-4">{children}</div>
+        </div>
+      </div>
     </div>
   )
 }

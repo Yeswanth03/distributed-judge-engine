@@ -42,3 +42,12 @@ export function formatArguments(input: string) {
 export function shortId(id: string) {
   return id.slice(0, 8)
 }
+
+/** The name to show for a leaderboard row: display name, else username, else a short id. */
+export function displayNameOf(e: {
+  user_id: string
+  username?: string | null
+  display_name?: string | null
+}) {
+  return e.display_name || e.username || shortId(e.user_id)
+}

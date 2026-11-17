@@ -42,70 +42,72 @@ export default function AdminUsersPage() {
         <ErrorState error={list.error} />
       ) : (
         <>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead className="w-36">Role</TableHead>
-                <TableHead className="w-36">Status</TableHead>
-                <TableHead className="text-right">Joined</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {list.data.pages
-                .flatMap((p) => p.items)
-                .map((u) => {
-                  const self = u.user_id === meId // the User Service refuses changes to your own role or status
-                  return (
-                    <TableRow key={u.user_id}>
-                      <TableCell>
-                        <div className="font-medium">{u.display_name || u.username}</div>
-                        <div className="text-xs text-muted-foreground">@{u.username}</div>
-                      </TableCell>
-                      <TableCell>{u.email}</TableCell>
-                      <TableCell>
-                        <Select
-                          value={u.role}
-                          disabled={self}
-                          onValueChange={(role) =>
-                            change.mutate({ id: u.user_id, role: role as User['role'] })
-                          }
-                        >
-                          <SelectTrigger aria-label={`Role of ${u.username}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="user">User</SelectItem>
-                            <SelectItem value="admin">Admin</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          value={u.status}
-                          disabled={self}
-                          onValueChange={(status) =>
-                            change.mutate({ id: u.user_id, status: status as User['status'] })
-                          }
-                        >
-                          <SelectTrigger aria-label={`Status of ${u.username}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="active">Active</SelectItem>
-                            <SelectItem value="disabled">Disabled</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                      <TableCell className="text-right text-muted-foreground">
-                        {formatRelative(u.created_at)}
-                      </TableCell>
-                    </TableRow>
-                  )
-                })}
-            </TableBody>
-          </Table>
+          <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>User</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead className="w-36">Role</TableHead>
+                  <TableHead className="w-36">Status</TableHead>
+                  <TableHead className="text-right">Joined</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {list.data.pages
+                  .flatMap((p) => p.items)
+                  .map((u) => {
+                    const self = u.user_id === meId // the User Service refuses changes to your own role or status
+                    return (
+                      <TableRow key={u.user_id}>
+                        <TableCell>
+                          <div className="font-medium">{u.display_name || u.username}</div>
+                          <div className="text-xs text-muted-foreground">@{u.username}</div>
+                        </TableCell>
+                        <TableCell>{u.email}</TableCell>
+                        <TableCell>
+                          <Select
+                            value={u.role}
+                            disabled={self}
+                            onValueChange={(role) =>
+                              change.mutate({ id: u.user_id, role: role as User['role'] })
+                            }
+                          >
+                            <SelectTrigger aria-label={`Role of ${u.username}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="user">User</SelectItem>
+                              <SelectItem value="admin">Admin</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={u.status}
+                            disabled={self}
+                            onValueChange={(status) =>
+                              change.mutate({ id: u.user_id, status: status as User['status'] })
+                            }
+                          >
+                            <SelectTrigger aria-label={`Status of ${u.username}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="disabled">Disabled</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {formatRelative(u.created_at)}
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })}
+              </TableBody>
+            </Table>
+          </div>
           {list.hasNextPage && (
             <div className="mt-4 flex justify-center">
               <Button

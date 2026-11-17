@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/AppLayout'
 import { Loading, RequireAuth } from '@/components/states'
 
 // Each page loads on first visit; the editor bundle (Monaco) only with the problem page.
+const LandingPage = lazy(() => import('@/pages/LandingPage'))
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const RegisterPage = lazy(() => import('@/pages/RegisterPage'))
 const ProblemsPage = lazy(() => import('@/pages/ProblemsPage'))
@@ -25,7 +26,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<AppLayout />}>
-          <Route index element={<Navigate to="/problems" replace />} />
+          <Route index element={page(<LandingPage />)} />
           <Route path="login" element={page(<LoginPage />)} />
           <Route path="register" element={page(<RegisterPage />)} />
           <Route path="problems" element={page(<ProblemsPage />)} />
@@ -48,7 +49,7 @@ export function App() {
             element={page(<RequireAuth admin>{<AdminProblemEditPage />}</RequireAuth>)}
           />
           <Route path="admin/users" element={page(<RequireAuth admin>{<AdminUsersPage />}</RequireAuth>)} />
-          <Route path="*" element={<Navigate to="/problems" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
     </BrowserRouter>
