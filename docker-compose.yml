@@ -233,7 +233,7 @@ services:
         condition: service_healthy
 
   # Observability: Prometheus scrapes each service's /metrics, Grafana shows the dashboards
-  # (deploy/prometheus, deploy/grafana). Grafana: http://localhost:3000, opens on the AI service dashboard.
+  # (deploy/prometheus, deploy/grafana). Grafana: http://localhost:3000, opens on the system overview; one dashboard per service.
   prometheus:
     image: prom/prometheus:v2.53.0
     volumes:
@@ -243,6 +243,15 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"   # reach services running on your machine (Linux; built in on Mac)
 
+  # Postgres metrics for Prometheus: connections, transactions and size per database. Not published.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    environment:
+      DATA_SOURCE_NAME: postgresql://postgres:postgres@postgres:5432/postgres?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   grafana:
     image: grafana/grafana:11.1.0
     environment:
@@ -250,7 +259,7 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin-local-only}
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/ai-service.json
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/system-overview.json
     volumes:
       - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro

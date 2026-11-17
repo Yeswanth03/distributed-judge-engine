@@ -214,6 +214,30 @@ static_resources:
                     typed_config:
                       "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
 
+    # Metrics for Prometheus, on the compose network only (port 9902 isn't published). It forwards just
+    # /stats/prometheus to the admin port; the rest of the admin API (which can, for example, shut Envoy down)
+    # stays unreachable.
+    - name: metrics
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 9902 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: metrics
+                route_config:
+                  virtual_hosts:
+                    - name: metrics
+                      domains: ["*"]
+                      routes:
+                        - match: { path: /stats/prometheus }
+                          route: { cluster: envoy_admin }
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
   clusters:
     - name: user_service
       type: STRICT_DNS
@@ -239,3 +263,9 @@ static_resources:
       load_assignment:
         cluster_name: ai_service
         endpoints: [{ lb_endpoints: [{ endpoint: { address: { socket_address: { address: ai-service, port_value: 8084 } } } }] }]
+    - name: envoy_admin
+      type: STATIC
+      connect_timeout: 1s
+      load_assignment:
+        cluster_name: envoy_admin
+        endpoints: [{ lb_endpoints: [{ endpoint: { address: { socket_address: { address: 127.0.0.1, port_value: 9901 } } } }] }]
