@@ -51,6 +51,8 @@ docker run --rm -v "$PWD/deploy/gateway/envoy.yaml:/etc/envoy/envoy.yaml:ro" env
 ```
 
 ## Notes
+- **Metrics:** Prometheus scrapes `gateway:9902/stats/prometheus` on the compose network (not published). That
+  listener forwards only the stats path to Envoy's admin port, which itself stays bound to 127.0.0.1.
 - **Direct service ports** (8080-8085) are published for local debugging only. Behind them, any client could
   send its own `X-User-Id`. In a real deployment only the gateway is exposed.
 - **Rate limits** are per gateway instance. With several instances, each client gets the limit on each one.

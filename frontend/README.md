@@ -5,19 +5,23 @@ Monaco (bundled, Python only) and react-markdown.
 
 ## Run it
 
-The backend runs behind the gateway on http://localhost:8000 (`docker compose up -d --wait` from the repo root).
+**With the whole system** (from the repo root): `docker compose up -d --build`. The app is at
+**http://localhost:5500**, served by nginx from a production build ([Dockerfile](Dockerfile),
+[nginx.conf.template](nginx.conf.template)). Set `FRONTEND_PORT` in `.env` to use another port.
+
+**While developing the frontend**, with hot reload (stop the compose `frontend` first, or give it another port):
 
 ```bash
 npm install
 npm run dev
 ```
 
-The app runs on **http://localhost:5500**. That port is already in the User Service's `OAUTH_ALLOWED_REDIRECTS`,
-so Google and GitHub sign-in can return to it. Set `GATEWAY_URL` to use another gateway.
+The dev server also runs on **http://localhost:5500**, which is already in the User Service's
+`OAUTH_ALLOWED_REDIRECTS`, so Google and GitHub sign-in can return to it. Set `GATEWAY_URL` to use another gateway.
 
 ## How it talks to the backend
 
-- Every call goes to `/api/<gateway path>`. The dev proxy (and later the production server) strips `/api` and forwards
+- Every call goes to `/api/<gateway path>`. The Vite dev proxy and nginx in compose both strip `/api` and forward
   to the gateway, which keeps API paths apart from page URLs such as `/problems/two-sum`.
 - The access token is kept in memory only. The refresh token is an HttpOnly cookie the browser sends to
   `/auth/refresh` itself; on page load the app refreshes once to restore the session.

@@ -20,10 +20,12 @@ public class UserListener {
 
     private final UserEventParser parser;
     private final UserProfileRepository profiles;
+    private final MessagingMetrics metrics;
 
-    public UserListener(UserEventParser parser, UserProfileRepository profiles) {
+    public UserListener(UserEventParser parser, UserProfileRepository profiles, MessagingMetrics metrics) {
         this.parser = parser;
         this.profiles = profiles;
+        this.metrics = metrics;
     }
 
     @RabbitListener(queues = RabbitConfig.USER_QUEUE)
@@ -31,8 +33,10 @@ public class UserListener {
         try {
             UserEvent event = parser.parse(message.getBody());
             boolean changed = profiles.upsertIfNewer(event) == 1;
+            metrics.userEvent(changed);
             log.debug("user {} version {}: {}", event.userId(), event.version(), changed ? "stored" : "older or duplicate, ignored");
         } catch (InvalidUserEventException e) {
+            metrics.userEventInvalid();
             log.warn("dead-lettering user event: {}", e.getMessage());
             throw new AmqpRejectAndDontRequeueException(e.getMessage(), e);
         }
