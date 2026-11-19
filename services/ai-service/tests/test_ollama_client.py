@@ -7,6 +7,7 @@ from app import ollama_client
 from app.config import settings
 from app.feedback_format import FeedbackReport, json_schema
 from app.ollama_client import OllamaClient, build_prompt, keep_line_breaks
+from app.resilience import new_breaker
 from app.schemas import FeedbackContext
 from tests.fakes import SUBMISSION, USER, FakeServices
 
@@ -54,7 +55,7 @@ def ollama(monkeypatch):
 
 def test_request_constrains_the_reply_to_the_schema(context, ollama):
     sent, _ = ollama
-    OllamaClient().generate_feedback(context)
+    OllamaClient(breaker=new_breaker("ollama")).generate_feedback(context)
     body = sent["json"]
     assert body["format"] == json_schema()
     assert set(body["format"]["required"]) == set(FeedbackReport.model_fields)  # every field, always
@@ -88,7 +89,7 @@ def test_prompt_keeps_the_format_rules_and_explains_the_fields(context):
 # ---- the reply ----
 
 def test_reply_is_rendered_in_the_agreed_layout(context, ollama):
-    result = OllamaClient().generate_feedback(context)
+    result = OllamaClient(breaker=new_breaker("ollama")).generate_feedback(context)
     blocks = result.text.split("\n\n")
     assert [b.split("  \n")[0] for b in blocks] == [
         "✗ Approach   ✓ Efficiency", "Approach", "Efficiency"]
@@ -101,21 +102,21 @@ def test_a_reply_that_does_not_match_the_format_is_rejected(context, ollama, raw
     _, reply = ollama
     reply["response"] = raw
     with pytest.raises(ValueError):  # treated like any bad response: retried, then unavailable
-        OllamaClient().generate_feedback(context)
+        OllamaClient(breaker=new_breaker("ollama")).generate_feedback(context)
 
 
 def test_a_reply_cut_off_by_the_cap_is_rejected(context, ollama):
     _, reply = ollama
     reply.update(response=json.dumps(report())[:120], done_reason="length")
     with pytest.raises(ValueError):
-        OllamaClient().generate_feedback(context)
+        OllamaClient(breaker=new_breaker("ollama")).generate_feedback(context)
 
 
 def test_code_in_a_field_is_removed(context, ollama):
     _, reply = ollama
     reply["response"] = json.dumps(report(
         approach_key_idea="Here is the fix: ```python\nreturn [seen[t - x], i]\n``` Store each value's index."))
-    text = OllamaClient().generate_feedback(context).text
+    text = OllamaClient(breaker=new_breaker("ollama")).generate_feedback(context).text
     assert "```" not in text and "return [seen" not in text and "Store each value's index." in text
 
 

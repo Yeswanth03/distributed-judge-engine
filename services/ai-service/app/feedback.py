@@ -219,6 +219,11 @@ class FeedbackProcessor:
             metrics.LLM_TOKENS.labels(settings.ollama_model, "input").inc(generated.input_tokens)
         if generated.output_tokens:
             metrics.LLM_TOKENS.labels(settings.ollama_model, "output").inc(generated.output_tokens)
+        per_hint = {"input": generated.input_tokens, "output": generated.output_tokens}
+        if all(per_hint.values()):
+            per_hint["total"] = per_hint["input"] + per_hint["output"]
+            for direction, tokens in per_hint.items():
+                metrics.LLM_TOKENS_PER_HINT.labels(settings.ollama_model, direction).observe(tokens)
         waited = (datetime.now(timezone.utc) - row["created_at"]).total_seconds()
         metrics.FEEDBACK_TIME_TO_READY.labels(source).observe(max(0.0, waited))
 

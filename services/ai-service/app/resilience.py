@@ -206,6 +206,10 @@ def backoff_delay(attempt: int, base: float, cap: float) -> float:
 
 def _ollama_failure(exc: BaseException) -> bool:
     # An empty or malformed generation also means the model server is unhealthy.
+    # A reply blocked by a guardrail came from a healthy model: its content was refused,
+    # so it must not count toward opening the circuit for everyone.
+    if not getattr(exc, "counts_as_outage", True):
+        return False
     return is_dependency_failure(exc) or isinstance(exc, ValueError)
 
 

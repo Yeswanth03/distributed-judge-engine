@@ -11,6 +11,7 @@ The fields are flat (no nesting) and in the order the text shows them, which kee
 model's job simple.
 """
 
+import json
 import re
 
 from pydantic import BaseModel, Field, ValidationError
@@ -107,6 +108,76 @@ def apply_rules(report: FeedbackReport, verdict: str) -> FeedbackReport:
     if verdict == "accepted" and data["approach_ok"] and data["efficiency_ok"]:
         data["summary"] = CONGRATULATIONS
     return FeedbackReport(**data)
+
+
+# ---- output guardrails: checked before a hint is saved or shown ----
+
+class HintBlocked(ValueError):
+    """The hint failed a guardrail. A ValueError, so it is handled like any bad model
+    reply: generation is retried, and after the last attempt the request is unavailable.
+    It is not an outage, so the Ollama circuit breaker ignores it."""
+
+    counts_as_outage = False
+
+
+# Code the model must never hand over. Each pattern needs real syntax (brackets, a colon,
+# an assignment), so prose such as "check the return statement" or "the for loop" passes.
+_CODE_PATTERNS = [
+    re.compile(r"\bdef\s+\w+\s*\("),                                    # def twoSum(
+    re.compile(r"\bclass\s+\w+\s*[:(]"),                                 # class Solution:
+    re.compile(r"\breturn\s+[\[(\w][^.?!]*?[\])]"),                        # return [i, j]
+    re.compile(r"\b(?:for|while)\b[^.?!]*:\s*(?:$|\w)"),                    # for i in range(n):
+    re.compile(r"\w+\s*=\s*(?:\{\}|\[\]|dict\(\)|set\(\)|\w+\[)"),          # seen = {}  /  x = nums[
+    re.compile(r"\w+\[[^\]]+\]\s*=\s*\w"),                                 # seen[x] = i
+]
+# Hidden test data shorter than this is too common to check reliably ("0 1", "[2,3]", "17"):
+# it would also appear in ordinary prose. Longer values are distinctive.
+_MIN_HIDDEN_CHARS = 8
+
+
+def looks_like_code(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _CODE_PATTERNS)
+
+
+def redact_code(report: FeedbackReport) -> tuple[FeedbackReport, int]:
+    """Removes code from every text field: fenced code blocks are cut out, and a field
+    that still contains code in its prose is replaced with "Unclear". Returns the cleaned
+    report and how many fields were changed (for the guardrail metric)."""
+    data, redacted = report.model_dump(), 0
+    for name, value in data.items():
+        if not isinstance(value, str):
+            continue
+        cleaned = _CODE_BLOCK.sub("", value)
+        if looks_like_code(cleaned):
+            cleaned = UNCLEAR
+        if cleaned != value:
+            data[name] = cleaned.strip() or UNCLEAR
+            redacted += 1
+    return FeedbackReport(**data), redacted
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"\s+", "", text).lower()
+
+
+def _hidden_values(case) -> list[str]:
+    """A hidden case's input and expected output, plus each argument of a JSON input
+    ({"nums": [...], "target": 17}), since a leak could quote just one of them."""
+    values = [case.input, case.expected_output]
+    try:
+        parsed = json.loads(case.input)
+    except (ValueError, TypeError):
+        parsed = None
+    if isinstance(parsed, dict):
+        values += [json.dumps(v, separators=(",", ":")) for v in parsed.values()]
+    return [v for v in (_squash(str(v)) for v in values) if len(v) >= _MIN_HIDDEN_CHARS]
+
+
+def leaks_hidden_tests(text: str, cases) -> bool:
+    """True if the text contains any hidden test case's data. Hidden cases are never put
+    in the prompt, so this is a second line of defence, not the first."""
+    squashed = _squash(text)
+    return any(value in squashed for case in cases if not case.is_sample for value in _hidden_values(case))
 
 
 def render(report: FeedbackReport) -> str:

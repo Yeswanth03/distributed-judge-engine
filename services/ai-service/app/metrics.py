@@ -74,6 +74,20 @@ LLM_GENERATION_SECONDS = Histogram(
     buckets=(0.5, 1, 2, 4, 6, 8, 10, 15, 20, 30, 60, 120),
 )
 LLM_TOKENS = Counter("ai_llm_tokens_total", "Tokens used by the LLM", ["model", "direction"])
+LLM_TOKENS_PER_HINT = Histogram(
+    "ai_llm_tokens_per_hint",
+    "Tokens one delivered hint cost: input (prompt), output (reply) and total. "
+    "The unit cost of the AI feature, even with a free local model.",
+    ["model", "direction"],
+    buckets=(100, 200, 300, 400, 500, 600, 800, 1000, 1200, 1500, 2000, 3000),
+)
+
+GUARDRAIL_ACTIONS = Counter(
+    "ai_feedback_guardrail_total",
+    "Output guardrails that fired: code_redacted (a field with code replaced), "
+    "hidden_test_blocked (a hint quoting hidden test data was blocked and regenerated)",
+    ["action"],
+)
 
 # ---- dependencies and circuit breakers ----
 

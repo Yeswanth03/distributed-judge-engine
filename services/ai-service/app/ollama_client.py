@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from . import feedback_format
+from . import feedback_format, metrics
 from .config import settings
 from .resilience import CircuitBreaker, breakers
 from .schemas import FeedbackContext
@@ -201,8 +201,18 @@ class OllamaClient:
         if payload.get("done_reason") == "length":
             raise ValueError("Ollama hit the output cap before finishing the JSON reply")
         report = feedback_format.apply_rules(feedback_format.parse(raw), context.verdict)
+
+        # Output guardrails, before anything is saved or shown.
+        report, redacted = feedback_format.redact_code(report)
+        if redacted:
+            metrics.GUARDRAIL_ACTIONS.labels("code_redacted").inc(redacted)
+        text = feedback_format.render(report)
+        if feedback_format.leaks_hidden_tests(text, context.problem.cases):
+            metrics.GUARDRAIL_ACTIONS.labels("hidden_test_blocked").inc()
+            raise feedback_format.HintBlocked("the hint contained hidden test data and was blocked")
+
         return GeneratedFeedback(
-            text=keep_line_breaks(feedback_format.render(report)),
+            text=keep_line_breaks(text),
             input_tokens=payload.get("prompt_eval_count"),
             output_tokens=payload.get("eval_count"),
         )

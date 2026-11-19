@@ -190,11 +190,16 @@ function FeedbackCard({ submission }: { submission: Submission }) {
         ) : f.status === 'ready' && f.feedback ? (
           <Markdown>{f.feedback}</Markdown>
         ) : f.status === 'unavailable' ? (
-          <p className="text-sm text-muted-foreground">
-            Hints are unavailable right now{f.error_reason ? ` (${f.error_reason})` : ''}.
-          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {f.message ?? "The AI tutor couldn't produce hints right now."}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => request.mutate()} disabled={request.isPending}>
+              {request.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />} Try again
+            </Button>
+          </div>
         ) : (
-          <Loading label="Thinking about your code…" />
+          <Loading label={f.message ?? 'Thinking about your code…'} />
         )}
       </div>
     </div>

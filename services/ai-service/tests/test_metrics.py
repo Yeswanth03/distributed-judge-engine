@@ -170,3 +170,46 @@ def test_sweep_reports_waiting_requests(processor):
     for status, count in processor.database.status_counts().items():
         metrics.FEEDBACK_REQUESTS.labels(status).set(count)
     assert value("ai_feedback_requests", status="queued") == 1
+
+
+def test_tokens_per_hint_are_recorded(processor):
+    model = settings.ollama_model
+    count = value("ai_llm_tokens_per_hint_count", model=model, direction="total")
+    total = value("ai_llm_tokens_per_hint_sum", model=model, direction="total")
+    output = value("ai_llm_tokens_per_hint_sum", model=model, direction="output")
+    row = queue(processor)
+    processor.generate(row["request_id"])
+    assert value("ai_llm_tokens_per_hint_count", model=model, direction="total") == count + 1
+    assert value("ai_llm_tokens_per_hint_sum", model=model, direction="total") == total + 132  # FakeOllama: 120 in + 12 out
+    assert value("ai_llm_tokens_per_hint_sum", model=model, direction="output") == output + 12
+
+
+def test_guardrail_actions_are_counted(processor, services, monkeypatch):
+    import json as _json
+
+    from app import ollama_client
+    from app.ollama_client import OllamaClient
+    from app.resilience import new_breaker
+    from app.schemas import FeedbackContext
+    from tests.test_ollama_client import report as model_reply
+
+    submissions, catalog = services.clients()
+    sub = submissions.get_submission(SUBMISSION, USER)
+    ctx = FeedbackContext("wrong_answer", sub, catalog.get_problem(sub.problem_ref, 1), 1, 3, None)
+
+    def reply_with(fields):
+        def fake_post(url, json, timeout):
+            body = {"response": _json.dumps(model_reply(**fields)), "prompt_eval_count": 1, "eval_count": 1, "done_reason": "stop"}
+            return httpx.Response(200, json=body, request=httpx.Request("POST", url))
+        monkeypatch.setattr(ollama_client.httpx, "post", fake_post)
+
+    redacted = value("ai_feedback_guardrail_total", action="code_redacted")
+    reply_with({"approach_key_idea": "Do seen[x] = i inside the loop."})
+    OllamaClient(breaker=new_breaker("ollama")).generate_feedback(ctx)
+    assert value("ai_feedback_guardrail_total", action="code_redacted") == redacted + 1
+
+    blocked = value("ai_feedback_guardrail_total", action="hidden_test_blocked")
+    reply_with({"approach_consider": "What does your code return for SECRET-HIDDEN-INPUT-999?"})
+    with pytest.raises(ValueError):
+        OllamaClient(breaker=new_breaker("ollama")).generate_feedback(ctx)
+    assert value("ai_feedback_guardrail_total", action="hidden_test_blocked") == blocked + 1
