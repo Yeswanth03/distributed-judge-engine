@@ -279,3 +279,14 @@ def test_health_reports_circuit_states(client, processor):
     degraded = client.get("/health")
     assert degraded.status_code == 200
     assert degraded.json()["status"] == "degraded" and degraded.json()["circuits"]["ollama"]["state"] == "open"
+
+
+def test_a_blocked_hint_does_not_open_the_ollama_circuit():
+    from app.feedback_format import HintBlocked
+    from app.resilience import new_breaker
+
+    breaker = new_breaker("ollama")
+    for _ in range(10):
+        with pytest.raises(HintBlocked):
+            breaker.call(raiser(HintBlocked("hidden test data")))
+    assert breaker.state is CircuitState.CLOSED  # the model answered; only its content was refused

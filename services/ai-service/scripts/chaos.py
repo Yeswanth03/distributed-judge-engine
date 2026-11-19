@@ -128,7 +128,7 @@ class Chaos:
             self.log(f"Ollama circuit OPEN after {time.monotonic() - started:.0f}s")
             waiting = [self.feedback(s) for s in sids]
             for sid, fb in zip(sids, waiting):
-                self.log(f"  feedback {sid[:8]}: {fb and fb['status']} - {fb and fb.get('error_reason')}")
+                self.log(f"  feedback {sid[:8]}: {fb and fb['status']} - {fb and fb.get('message')}")
         finally:
             self.compose("up", "-d", "--wait", "ollama")
         deferred = sum(1 for fb in waiting if fb and fb["status"] == "queued")

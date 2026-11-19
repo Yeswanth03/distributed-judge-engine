@@ -216,7 +216,8 @@ export interface Feedback {
   verdict: string
   status: 'queued' | 'processing' | 'ready' | 'unavailable'
   feedback: string | null
-  error_reason: string | null
+  /** Safe, learner-facing explanation for waiting or unavailable hints. */
+  message: string | null
   created_at: string
   updated_at: string
 }

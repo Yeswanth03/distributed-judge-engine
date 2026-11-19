@@ -9,6 +9,7 @@ from prometheus_client import REGISTRY
 from app import api
 from app.config import settings
 from app.feedback import FeedbackProcessor, NotAccepted
+from app.schemas import TAKING_LONGER
 from tests.fakes import SUBMISSION, USER, FakeDatabase, FakeOllama, FakeServices
 
 DIRECT = f"/submissions/{SUBMISSION}/feedback/direct"
@@ -77,7 +78,8 @@ def test_model_failure_falls_back_to_the_queue(client, processor):
     resp = client.post(DIRECT, headers=HEADERS)
     assert resp.status_code == 202
     body = resp.json()
-    assert body["status"] == "queued" and "background" in body["error_reason"]
+    assert body["status"] == "queued" and body["message"] == TAKING_LONGER
+    assert "error_reason" not in body  # internal detail, never sent to clients
     assert direct_count("fallback") == before + 1
 
     processor.ollama.down = False
