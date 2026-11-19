@@ -32,10 +32,11 @@ class Settings(BaseSettings):
     ollama_model: str = "qwen2.5-coder:7b"
     ollama_timeout_seconds: float = 120.0
     # Generation settings sent with every request. The model writes one token at a time, so
-    # output length drives latency: num_predict is a hard cap (the prompt asks for 2-4 hints,
-    # about 100 words or 140 tokens; 200 leaves margin). Low temperature keeps hints focused and repeatable.
+    # output length drives latency: num_predict is a hard cap. The reply is a JSON object of
+    # short fields (about 250-300 tokens including the keys); 500 leaves margin, because a
+    # reply cut off by the cap is invalid JSON. Low temperature keeps hints focused and repeatable.
     # Prompts are ~700 tokens, so a 4096-token context is plenty (Ollama's default here was 8192).
-    ollama_num_predict: int = 200
+    ollama_num_predict: int = 500
     ollama_temperature: float = 0.2
     ollama_num_ctx: int = 4096
     # How long Ollama keeps the model in memory after the last request, so the next hint
@@ -45,7 +46,7 @@ class Settings(BaseSettings):
     # must answer before the gateway gives up (15 s for /api/v1/ai/*). Slower than this, the
     # request falls back to the background queue and the client polls as usual.
     direct_timeout_seconds: float = 12.0
-    prompt_version: str = "5"
+    prompt_version: str = "8"
 
     # Background generation: worker threads, attempts per request for transient
     # failures, and how often queued/stuck requests are picked up again.

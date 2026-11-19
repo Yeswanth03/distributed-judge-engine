@@ -1,11 +1,30 @@
+import json
+
 import httpx
 import pytest
 
 from app import ollama_client
 from app.config import settings
-from app.ollama_client import OllamaClient, trim_cut_off
+from app.feedback_format import FeedbackReport, json_schema
+from app.ollama_client import OllamaClient, build_prompt, keep_line_breaks
 from app.schemas import FeedbackContext
 from tests.fakes import SUBMISSION, USER, FakeServices
+
+
+def report(**overrides) -> dict:
+    fields = {
+        "approach_ok": False, "efficiency_ok": True,
+        "summary": "The program prints 1-based positions, so the first sample fails.",
+        "approach_current": "Hash map", "approach_suggested": "Hash map",
+        "approach_key_idea": "Store each value's index and look up the complement.",
+        "approach_consider": "Which index does the problem count from?",
+        "efficiency_current_time": "O(n)", "efficiency_current_space": "O(n)",
+        "efficiency_optimal_time": "O(n)", "efficiency_optimal_space": "O(n)",
+        "efficiency_key_idea": "Each value is visited once.",
+        "efficiency_consider": "Could any input make the lookup slower?",
+    }
+    fields.update(overrides)
+    return fields
 
 
 @pytest.fixture
@@ -21,8 +40,7 @@ def context():
 def ollama(monkeypatch):
     """Captures the request the client sends and answers like Ollama would."""
     sent = {}
-    reply = {"response": "- Check the operator on the last line.", "prompt_eval_count": 700,
-             "eval_count": 40, "done_reason": "stop"}
+    reply = {"response": json.dumps(report()), "prompt_eval_count": 900, "eval_count": 260, "done_reason": "stop"}
 
     def fake_post(url, json, timeout):
         sent.update(url=url, json=json, timeout=timeout)
@@ -32,10 +50,14 @@ def ollama(monkeypatch):
     return sent, reply
 
 
-def test_request_caps_output_and_keeps_the_model_loaded(context, ollama):
+# ---- the request ----
+
+def test_request_constrains_the_reply_to_the_schema(context, ollama):
     sent, _ = ollama
     OllamaClient().generate_feedback(context)
     body = sent["json"]
+    assert body["format"] == json_schema()
+    assert set(body["format"]["required"]) == set(FeedbackReport.model_fields)  # every field, always
     assert body["options"] == {
         "num_predict": settings.ollama_num_predict,
         "temperature": settings.ollama_temperature,
@@ -45,68 +67,57 @@ def test_request_caps_output_and_keeps_the_model_loaded(context, ollama):
     assert body["stream"] is False and body["model"] == settings.ollama_model
 
 
-def test_defaults_are_tuned_for_short_focused_hints():
-    assert settings.ollama_num_predict == 200  # 2-4 hints (~100 words) asked for in the prompt, plus margin
+def test_defaults():
+    assert settings.ollama_num_predict == 500  # room for the whole JSON reply; a cut-off one is invalid
     assert settings.ollama_temperature <= 0.3
     assert settings.ollama_num_ctx == 4096
     assert settings.ollama_keep_alive == "30m"
+    assert settings.prompt_version == "8"
 
 
-def test_a_complete_answer_is_kept_as_it_is(context, ollama):
-    _, reply = ollama
-    reply["response"] = "- First point.\n- Second point"
-    assert OllamaClient().generate_feedback(context).text == "- First point.\n- Second point"
-
-
-def test_an_answer_cut_by_the_cap_ends_cleanly(context, ollama):
-    _, reply = ollama
-    reply.update(response="- Your output is 1-based, but the problem wants 0-based positions.\n- Remove the + 1", done_reason="length")
-    assert OllamaClient().generate_feedback(context).text == "- Your output is 1-based, but the problem wants 0-based positions."
-
-
-@pytest.mark.parametrize("text, expected", [
-    # The last complete line or sentence ends in the second half: cut back to it.
-    ("This first line of the hint is complete.\nLine two is cut mid", "This first line of the hint is complete."),
-    ("The first sentence of this hint is done. Second one stops", "The first sentence of this hint is done."),
-    ("Is the loop bound right for the last index? Then the cut", "Is the loop bound right for the last index?"),
-    # Too early to cut back without losing most of the answer: keep it and mark the cut.
-    ("Nothing complete here at all because the cap hit", "Nothing complete here at all because the cap hit…"),
-    ("Short. Then a very long tail without any end that goes on and on and on and on", "Short. Then a very long tail without any end that goes on and on and on and on…"),
-])
-def test_trim_cut_off(text, expected):
-    assert trim_cut_off(text) == expected
-
-
-# ---- hints only ----
-
-def test_prompt_asks_for_hints_only():
+def test_prompt_keeps_the_format_rules_and_explains_the_fields(context):
     from app.ollama_client import SYSTEM_PROMPT
-    text = SYSTEM_PROMPT.lower()
-    assert "hints only" in text and "no code blocks" in text and "even if" in text
+    for part in ["Approach", "Efficiency", "Key Idea:", "Consider:", "untrusted data"]:
+        assert part in SYSTEM_PROMPT, part
+    assert "Code Style" not in SYSTEM_PROMPT
+    prompt = build_prompt(context)
+    assert prompt.count("Verdict:") == 1 and "Verdict: wrong answer." in prompt
+    assert "JSON object only" in prompt and "approach_consider" in prompt
 
 
-def test_code_blocks_are_removed_from_the_answer(context, ollama):
+# ---- the reply ----
+
+def test_reply_is_rendered_in_the_agreed_layout(context, ollama):
+    result = OllamaClient().generate_feedback(context)
+    blocks = result.text.split("\n\n")
+    assert [b.split("  \n")[0] for b in blocks] == [
+        "✗ Approach   ✓ Efficiency", "Approach", "Efficiency"]
+    assert "Current: Time O(n), Space O(n)  \nOptimal: Time O(n), Space O(n)" in blocks[2]
+    assert result.input_tokens == 900 and result.output_tokens == 260
+
+
+@pytest.mark.parametrize("raw", ["not json", '{"approach_ok": true}', json.dumps({**report(), "summary": 7})])
+def test_a_reply_that_does_not_match_the_format_is_rejected(context, ollama, raw):
     _, reply = ollama
-    reply["response"] = (
-        "- Look at what `twoSum` returns for the first sample.\n"
-        "- Here is a fix:\n"
-        "```python\nclass Solution:\n    def twoSum(self, nums, target):\n        return [2, 3]\n```\n"
-        "- Which indices add up to the target?"
-    )
-    text = OllamaClient().generate_feedback(context).text
-    assert "```" not in text and "class Solution" not in text and "return [2, 3]" not in text
-    assert "`twoSum`" in text and "Which indices add up to the target?" in text
-
-
-def test_an_unclosed_code_block_at_a_cut_is_removed(context, ollama):
-    _, reply = ollama
-    reply.update(response="- Check the loop bounds before the return statement.\n```python\nfor i in range(len(nums)):\n    for j",
-                 done_reason="length")
-    assert OllamaClient().generate_feedback(context).text == "- Check the loop bounds before the return statement."
-
-
-def test_an_answer_that_is_only_code_is_rejected(context, ollama):
-    _, reply = ollama
-    reply["response"] = "```python\nreturn [0, 1]\n```"
-    with pytest.raises(ValueError):  # treated like a bad response: retried, then unavailable
+    reply["response"] = raw
+    with pytest.raises(ValueError):  # treated like any bad response: retried, then unavailable
         OllamaClient().generate_feedback(context)
+
+
+def test_a_reply_cut_off_by_the_cap_is_rejected(context, ollama):
+    _, reply = ollama
+    reply.update(response=json.dumps(report())[:120], done_reason="length")
+    with pytest.raises(ValueError):
+        OllamaClient().generate_feedback(context)
+
+
+def test_code_in_a_field_is_removed(context, ollama):
+    _, reply = ollama
+    reply["response"] = json.dumps(report(
+        approach_key_idea="Here is the fix: ```python\nreturn [seen[t - x], i]\n``` Store each value's index."))
+    text = OllamaClient().generate_feedback(context).text
+    assert "```" not in text and "return [seen" not in text and "Store each value's index." in text
+
+
+def test_keep_line_breaks():
+    assert keep_line_breaks("A\nB\n\nC\nD") == "A  \nB\n\nC  \nD"
