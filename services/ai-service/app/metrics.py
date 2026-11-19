@@ -56,6 +56,11 @@ FEEDBACK_REQUESTS = Gauge(
     "ai_feedback_requests", "Feedback requests currently waiting, by status", ["status"]
 )
 GENERATIONS_IN_FLIGHT = Gauge("ai_generations_in_flight", "Generations running right now")
+DIRECT_FEEDBACK = Counter(
+    "ai_direct_feedback_total",
+    "Direct hints for accepted submissions: ready in the request, or fell back to the queue",
+    ["outcome"],
+)
 GENERATION_RETRIES = Counter(
     "ai_generation_retries_total", "Generation attempts retried after a transient error", ["error"]
 )

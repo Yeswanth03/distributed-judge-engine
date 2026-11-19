@@ -13,7 +13,7 @@ from .broker import consume_forever
 from .clients import ContextNotFound
 from .cors import cors_middleware
 from .database import feedback_database
-from .feedback import SubmissionNotJudged, feedback_processor
+from .feedback import NotAccepted, SubmissionNotJudged, feedback_processor
 from .resilience import CircuitOpenError, breakers
 from .schemas import FeedbackResponse
 
@@ -105,6 +105,48 @@ def request_feedback(submission_id: UUID, response: Response, x_user_id: str = U
 
     if row["status"] == "ready":
         response.status_code = status.HTTP_200_OK
+    return row
+
+
+@app.post(
+    "/submissions/{submission_id}/feedback/direct",
+    response_model=FeedbackResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get AI hints now, for an accepted submission",
+    responses={
+        200: {"model": FeedbackResponse, "description": "Hints generated in this request (or saved earlier)."},
+        202: {"model": FeedbackResponse, "description": "The model was too slow or unavailable; generation continues "
+                                                         "in the background. Poll GET /feedback-requests/{request_id}."},
+        404: {"description": "No such submission for this user."},
+        409: {"description": "The submission is not accepted; use POST /submissions/{submission_id}/feedback."},
+        502: {"description": "The Submission Service could not be reached."},
+        503: {"description": "The Submission Service's circuit is open; retry after `retry_after` seconds."},
+    },
+)
+def request_direct_feedback(submission_id: UUID, response: Response, x_user_id: str = UserId) -> dict:
+    """For accepted submissions only: calls the model right away and returns the hints in the
+    response, instead of queueing them. Failed submissions keep the queued endpoint above,
+    unchanged. If the model can't answer within AI_DIRECT_TIMEOUT_SECONDS (under the gateway's
+    15 s limit), the request continues in the background and this answers 202."""
+    try:
+        row, ready = feedback_processor.request_direct(submission_id, x_user_id)
+    except ContextNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found") from exc
+    except NotAccepted as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Direct hints are only for accepted submissions; use POST /submissions/{id}/feedback",
+        ) from exc
+    except CircuitOpenError as exc:
+        return circuit_open_response(exc)
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The Submission Service is unavailable; try again shortly.",
+        ) from exc
+
+    if not ready:
+        response.status_code = status.HTTP_202_ACCEPTED
     return row
 
 

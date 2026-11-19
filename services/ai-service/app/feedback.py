@@ -29,6 +29,10 @@ from .schemas import FeedbackContext
 logger = logging.getLogger("ai_service.feedback")
 
 
+class NotAccepted(Exception):
+    """Direct hints are only for accepted submissions; failed ones use the queued path."""
+
+
 class SubmissionNotJudged(Exception):
     """The submission has no final verdict yet, or the judge itself failed on it."""
 
@@ -99,6 +103,63 @@ class FeedbackProcessor:
         if row["status"] == "queued":
             self.submit(row["request_id"])
         return row, created
+
+    def request_direct(self, submission_id: UUID, user_id: str) -> tuple[dict, bool]:
+        """Accepted submissions only: generate the hints inside this request instead of in the
+        background. Returns (row, ready).
+
+        Failed submissions are untouched: they keep the queued path (request_on_demand and the
+        failed-verdict consumer). If the model can't answer within direct_timeout_seconds, or a
+        circuit is open, the request falls back to that same background queue (ready=False) and
+        the client polls as usual, so a slow model never turns into an error.
+        Raises ContextNotFound, NotAccepted, CircuitOpenError (Submission Service) or httpx.HTTPError."""
+        submission = self.submissions.get_submission(str(submission_id), user_id)
+        if submission.verdict != "accepted":
+            raise NotAccepted("direct hints are only for accepted submissions")
+
+        row, created = self.database.create_or_reuse_user_request(
+            submission_id=submission_id,
+            user_id=user_id,
+            problem_id=None,
+            verdict=submission.verdict,
+        )
+        if created:
+            metrics.FEEDBACK_REQUESTS_CREATED.labels("user_request").inc()
+        if row["status"] != "queued":
+            return row, row["status"] == "ready"  # already generated, or being generated
+
+        claimed = self.database.claim(row["request_id"])
+        if claimed is None:  # a background worker got there first
+            return self.database.get_request(row["request_id"], user_id), False
+
+        request_id = claimed["request_id"]
+        metrics.GENERATIONS_IN_FLIGHT.inc()
+        try:
+            context = self._load_context(claimed)
+            self.database.set_problem_id(request_id, context.problem.problem_id)
+            started = time.monotonic()
+            generated = self.ollama.generate_feedback(context, timeout=settings.direct_timeout_seconds)
+            metrics.LLM_GENERATION_SECONDS.labels(settings.ollama_model).observe(time.monotonic() - started)
+            saved = self.database.save_feedback(
+                request_id, generated.text, generated.input_tokens, generated.output_tokens
+            )
+            self._record_ready(claimed, generated)
+            metrics.DIRECT_FEEDBACK.labels("ready").inc()
+            return saved, True
+        except ContextNotFound as exc:
+            self.database.mark_unavailable(request_id, str(exc))
+            metrics.FEEDBACK_OUTCOMES.labels("user_request", "unavailable").inc()
+            return self.database.get_request(request_id, user_id), False
+        except (httpx.HTTPError, ValueError, KeyError, CircuitOpenError) as exc:
+            logger.info("direct hints for %s fell back to the queue: %s", request_id, exc)
+            self.database.requeue_for_retry(
+                request_id, reason=f"generating in the background ({type(exc).__name__})"
+            )
+            metrics.DIRECT_FEEDBACK.labels("fallback").inc()
+            self.submit(request_id)
+            return self.database.get_request(request_id, user_id), False
+        finally:
+            metrics.GENERATIONS_IN_FLIGHT.dec()
 
     # ---- generation ----
 

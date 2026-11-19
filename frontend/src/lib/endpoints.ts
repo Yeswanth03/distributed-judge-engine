@@ -120,5 +120,8 @@ export const runs = {
 export const feedback = {
   request: (submissionId: string) =>
     api<Feedback>(`/api/v1/ai/submissions/${submissionId}/feedback`, { method: 'POST' }),
+  /** Accepted submissions only: the AI answers in the same request (202 if it had to fall back to the queue). */
+  requestDirect: (submissionId: string) =>
+    api<Feedback>(`/api/v1/ai/submissions/${submissionId}/feedback/direct`, { method: 'POST' }),
   get: (submissionId: string) => api<Feedback>(`/api/v1/ai/submissions/${submissionId}/feedback`),
 }

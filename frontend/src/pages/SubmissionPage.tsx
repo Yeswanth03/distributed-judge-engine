@@ -155,7 +155,11 @@ function FeedbackCard({ submission }: { submission: Submission }) {
   })
 
   const request = useMutation({
-    mutationFn: () => feedback.request(submission.submission_id),
+    // Accepted: hints are generated right away. Anything else keeps the queued request and polling.
+    mutationFn: () =>
+      submission.verdict === 'ACCEPTED'
+        ? feedback.requestDirect(submission.submission_id)
+        : feedback.request(submission.submission_id),
     onSuccess: (f) => queryClient.setQueryData(key, f),
     onError: (e) => toast.error(errorMessage(e)),
   })
