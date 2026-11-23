@@ -33,7 +33,7 @@ flowchart LR
   GW --> CAT[Catalog + Leaderboard]
   GW --> AI[AI service]
   SS -- jobs --> MQ[(RabbitMQ)]
-  MQ -- jobs --> JW[Judge workers x2]
+  MQ -- jobs --> JW[Judge workers]
   JW -- test sets --> CAT
   JW -- run code --> SP[Spawner]
   SP --> SB[[Sandbox containers]]
